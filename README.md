@@ -52,4 +52,4 @@ Mesh is **free for personal and noncommercial use** under the
 
 **Commercial use, including any use by or for a business, requires a separate
 commercial license.** For commercial and enterprise licensing, contact
-`licensing@quonkel.com`.
+`contact@quonkel.com`.
