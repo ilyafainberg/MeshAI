@@ -14,7 +14,7 @@ Get the latest build from the [Releases](../../releases) page.
 | Package | What it is |
 |---|---|
 | `Mesh-Client-win-x64-vX.Y.Z.zip` | The Mesh desktop client for Windows (x64). Self-contained, no .NET install required. Unzip and run `Mesh.App.exe`. |
-| `Mesh-Relay-selfhost-vX.Y.Z.zip` | Everything needed to run your own Mesh relay: Docker files, self-contained Linux/Windows binaries, source, and docs. |
+| `Mesh-Relay-selfhost-vX.Y.Z.zip` | Everything needed to run your own Mesh relay: Docker files, self-contained Linux/Windows binaries, and docs. |
 
 ### Windows client
 
@@ -44,3 +44,12 @@ bin\win-x64\run.cmd           # Windows
 
 Full configuration, scaling, and security guidance is in `SELF-HOSTING.md` inside
 the package.
+
+## License
+
+Mesh is **free for personal and noncommercial use** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE).
+
+**Commercial use, including any use by or for a business, requires a separate
+commercial license.** For commercial and enterprise licensing, contact
+`licensing@quonkel.com`.
