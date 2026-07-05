@@ -44,8 +44,3 @@ bin\win-x64\run.cmd           # Windows
 
 Full configuration, scaling, and security guidance is in `SELF-HOSTING.md` inside
 the package.
-
-## License
-
-Mesh is commercial software. Use of the binaries is governed by the
-[Mesh Commercial Software License Agreement](LICENSE). All rights reserved.
