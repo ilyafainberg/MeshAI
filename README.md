@@ -5,7 +5,7 @@ end-to-end encryption. Bring your own model, or use a hosted one. Run your own
 relay if you want the metadata to stay with you.
 
 This repository hosts the **official public releases** (downloadable binaries) of
-Mesh. The source code is maintained separately.
+Mesh.
 
 ## Download
 
