@@ -1,0 +1,68 @@
+Mesh Commercial Software License Agreement
+Copyright (c) 2026 Ilya Fainberg. All rights reserved.
+
+This End User License Agreement ("Agreement") is a legal agreement between you
+(either an individual or a single entity, "You") and Ilya Fainberg ("Licensor")
+for the Mesh software, including the client application, the relay server, any
+associated binaries, media, and documentation distributed from this repository
+(collectively, the "Software").
+
+By downloading, installing, copying, or otherwise using the Software, You agree
+to be bound by the terms of this Agreement. If You do not agree, do not download,
+install, or use the Software.
+
+1. GRANT OF LICENSE
+   Subject to Your compliance with this Agreement, Licensor grants You a
+   personal, non-exclusive, non-transferable, revocable license to download and
+   use the Software in object/binary form for Your own internal or personal use.
+
+2. RESTRICTIONS
+   You shall NOT, and shall not permit any third party to:
+   (a) sell, rent, lease, sublicense, distribute, or otherwise commercially
+       exploit or make the Software available to any third party, except as
+       expressly permitted in writing by Licensor;
+   (b) reverse engineer, decompile, or disassemble the Software, or otherwise
+       attempt to derive its source code, except to the extent such activity is
+       expressly permitted by applicable law notwithstanding this limitation;
+   (c) modify, adapt, translate, or create derivative works based on the
+       Software;
+   (d) remove, alter, or obscure any proprietary notices (including copyright
+       or trademark notices) on or in the Software;
+   (e) use the Software to build a competing product or service.
+
+3. OWNERSHIP
+   The Software is licensed, not sold. Licensor retains all right, title, and
+   interest in and to the Software, including all intellectual property rights.
+   No rights are granted to You other than as expressly set forth in this
+   Agreement.
+
+4. SELF-HOSTING
+   The relay component may be run by You on Your own infrastructure solely to
+   provide the Mesh service to Yourself and users You authorize. This does not
+   grant any right to redistribute, resell, or offer the relay as a commercial
+   hosted service to third parties without Licensor's prior written consent.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL LICENSOR
+   BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES
+   WHATSOEVER ARISING OUT OF OR IN ANY WAY RELATED TO THE USE OF OR INABILITY TO
+   USE THE SOFTWARE.
+
+7. TERMINATION
+   This Agreement is effective until terminated. Your rights under this Agreement
+   terminate automatically without notice if You fail to comply with any of its
+   terms. Upon termination, You must cease all use of the Software and destroy
+   all copies.
+
+8. GOVERNING LAW
+   This Agreement shall be governed by and construed in accordance with the laws
+   applicable at Licensor's place of residence, without regard to conflict-of-law
+   principles.
+
+For commercial licensing, redistribution rights, or other permissions beyond the
+scope of this Agreement, contact the Licensor.
