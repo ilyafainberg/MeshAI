@@ -22,7 +22,7 @@ Get the latest build from the [Releases](../../releases) page.
 2. Unzip anywhere.
 3. Run `Mesh.App.exe`.
 
-By default the client connects to the public relay at `https://relay.quonkel.com`.
+By default the client connects to the public relay at `https://meshrelay.net`.
 You can point it at any relay (including your own) from the onboarding screen or
 Settings.
 
