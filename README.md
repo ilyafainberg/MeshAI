@@ -23,9 +23,6 @@ model, or use the free one that's built in.
 > isn't from a big vendor yet. Click **More info → Run anyway**. Mesh is safe and
 > open about what it does.
 
-Prefer no installer? Grab **`Mesh-Client-win-x64-*.zip`** instead, unzip it
-anywhere, and run `Mesh.App.exe`.
-
 ---
 
 ## What can I do with it?
@@ -53,7 +50,7 @@ device. The relay that passes them along only sees who is talking to whom, never
 
 **Does it cost anything?**
 Free for personal use. If you use it for business, you need a commercial
-license - email `contact@quonkel.com`.
+license - open an issue on this repo to arrange one.
 
 **Do I need to set up an AI model?**
 No. There's a free one built in so you can start immediately. You can switch to
@@ -73,16 +70,15 @@ readable form.
 *(Advanced - most people don't need this.)*
 
 A relay is the small server that routes encrypted messages between people. You
-can run your own so the message metadata stays entirely with you. Download
-**`Mesh-Relay-selfhost-*.zip`** from the
-[latest release](../../releases/latest) - it includes a one-command Docker setup
-and ready-to-run binaries, plus a full `SELF-HOSTING.md` guide.
+can run your own so the message metadata stays entirely with you. It lives in its
+own repo: **[MeshRelayAI/Relay](https://github.com/MeshRelayAI/Relay)** - Docker
+setup, ready-to-run binaries, and a full guide.
 
 ---
 
 ## License
 
-Mesh is **free for personal and non‑commercial use** under the
-[PolyForm Noncommercial License 1.0.0](LICENSE). Using it in or for a business
-requires a commercial license - contact **`contact@quonkel.com`**.
+Mesh is free for personal use. For commercial or business use, open an issue on
+this repo to arrange a commercial license.
+
 
