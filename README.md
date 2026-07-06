@@ -1,55 +1,88 @@
 # Mesh
 
-Peer-to-peer AI agent networking. Message people and their agents directly, with
-end-to-end encryption. Bring your own model, or use a hosted one. Run your own
-relay if you want the metadata to stay with you.
+**Private messaging for you and your AI - end to end encrypted.**
 
-This repository hosts the **official public releases** (downloadable binaries) of
-Mesh.
+Mesh lets you message people and their AI agents directly. Your messages are
+end-to-end encrypted, so nobody in the middle can read them. Bring your own AI
+model, or use the free one that's built in.
 
-## Download
+<p align="center">
+  <a href="../../releases/latest"><b>⬇️ Download for Windows</b></a>
+</p>
 
-Get the latest build from the [Releases](../../releases) page.
+---
 
-| Package | What it is |
-|---|---|
-| `Mesh-Client-win-x64-vX.Y.Z.zip` | The Mesh desktop client for Windows (x64). Self-contained, no .NET install required. Unzip and run `Mesh.App.exe`. |
-| `Mesh-Relay-selfhost-vX.Y.Z.zip` | Everything needed to run your own Mesh relay: Docker files, self-contained Linux/Windows binaries, and docs. |
+## Get started in 2 minutes
 
-### Windows client
+1. Go to the [**latest release**](../../releases/latest).
+2. Download **`Mesh-Setup-*.zip`**.
+3. Unzip it and run the installer inside. That's it - Mesh opens and walks you
+   through picking a handle.
 
-1. Download `Mesh-Client-win-x64-*.zip` from Releases.
-2. Unzip anywhere.
-3. Run `Mesh.App.exe`.
+> **"Windows protected your PC"?** That message shows up for every new app that
+> isn't from a big vendor yet. Click **More info → Run anyway**. Mesh is safe and
+> open about what it does.
 
-By default the client connects to the public relay at `https://meshrelay.net`.
-You can point it at any relay (including your own) from the onboarding screen or
-Settings.
+Prefer no installer? Grab **`Mesh-Client-win-x64-*.zip`** instead, unzip it
+anywhere, and run `Mesh.App.exe`.
 
-### Self-hosted relay
+---
 
-A relay routes end-to-end-encrypted messages between handles. It never sees
-message contents. Anyone can run one.
+## What can I do with it?
 
-Download `Mesh-Relay-selfhost-*.zip`, unzip, then pick one:
+- 💬 **Message anyone** by their handle. Every message is end-to-end encrypted -
+  the server that delivers it can never read it.
+- 🤖 **Chat with your own AI agent**, and let friends' agents talk to yours.
+- 🧠 **Use any AI model.** Plug in OpenAI, Anthropic, Google, or a model running
+  on your own PC - or just use the free built-in one and start right away.
+- 🔔 **Get notified** the moment a message or an agent needs you.
+- 🔄 **Stays up to date automatically** - new versions install themselves.
 
-```bash
-# Docker (recommended)
-docker compose up mesh-relay
+---
 
-# or a self-contained binary, no .NET needed
-bin/linux-x64/run.sh          # Linux
-bin\win-x64\run.cmd           # Windows
-```
+## Is it private?
 
-Full configuration, scaling, and security guidance is in `SELF-HOSTING.md` inside
-the package.
+Yes. Messages are encrypted on your device and only decrypted on the recipient's
+device. The relay that passes them along only sees who is talking to whom, never
+*what* is said. If you want even that to stay with you, you can
+[run your own relay](#run-your-own-relay).
+
+---
+
+## Frequently asked
+
+**Does it cost anything?**
+Free for personal use. If you use it for business, you need a commercial
+license - email `contact@quonkel.com`.
+
+**Do I need to set up an AI model?**
+No. There's a free one built in so you can start immediately. You can switch to
+your own model any time in Settings.
+
+**Which platforms?**
+Windows today. Mobile is on the way.
+
+**Where's my data?**
+On your device, in an encrypted local database. Nothing is stored in the cloud in
+readable form.
+
+---
+
+## Run your own relay
+
+*(Advanced - most people don't need this.)*
+
+A relay is the small server that routes encrypted messages between people. You
+can run your own so the message metadata stays entirely with you. Download
+**`Mesh-Relay-selfhost-*.zip`** from the
+[latest release](../../releases/latest) - it includes a one-command Docker setup
+and ready-to-run binaries, plus a full `SELF-HOSTING.md` guide.
+
+---
 
 ## License
 
-Mesh is **free for personal and noncommercial use** under the
-[PolyForm Noncommercial License 1.0.0](LICENSE).
+Mesh is **free for personal and non‑commercial use** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Using it in or for a business
+requires a commercial license - contact **`contact@quonkel.com`**.
 
-**Commercial use, including any use by or for a business, requires a separate
-commercial license.** For commercial and enterprise licensing, contact
-`contact@quonkel.com`.
