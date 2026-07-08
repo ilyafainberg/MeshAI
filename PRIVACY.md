@@ -31,13 +31,13 @@ information.
 
 Everything below is stored **locally on your device**:
 
-- **Your identity** — a public/private key pair and the handle and display name you
+- **Your identity** - a public/private key pair and the handle and display name you
   chose. The private key and your database encryption key are held in your operating
   system's secure key store (Windows DPAPI, Apple Keychain, or Android Keystore).
-- **Your data** — contacts, circles, conversations and message history, knowledge
+- **Your data** - contacts, circles, conversations and message history, knowledge
   entries, skills, widgets, and settings. This is kept in a per-identity database that
   is encrypted at rest (SQLCipher) with a key only your device holds.
-- **Backups** — if you create a backup, it is produced locally. If you move it off your
+- **Backups** - if you create a backup, it is produced locally. If you move it off your
   device, its protection is your responsibility.
 
 Mesh does not upload this data to us, and we do not have a copy of it or of your keys.
@@ -64,13 +64,13 @@ If you self-host the relay, all of the above happens on infrastructure you contr
 Mesh's agent needs a language model to work. You choose the provider, and that choice
 determines where your prompts go:
 
-- **On-device model** — runs entirely on your machine. Your prompts and the agent's
+- **On-device model** - runs entirely on your machine. Your prompts and the agent's
   responses do not leave your device.
-- **Mesh-hosted free model** — a shared model reached through the relay, provided as a
+- **Mesh-hosted free model** - a shared model reached through the relay, provided as a
   convenience with a daily usage budget. Only the content you send to the agent is
   processed to produce a reply.
 - **Your own provider key** (for example Anthropic, OpenAI, Google, Azure OpenAI, xAI,
-  or Groq) — when you configure your own key, your prompts are sent directly to that
+  or Groq) - when you configure your own key, your prompts are sent directly to that
   provider under **that provider's terms and privacy policy**. Mesh does not sit in the
   middle of, or retain, those requests.
 
