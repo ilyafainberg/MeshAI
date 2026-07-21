@@ -1,0 +1,238 @@
+﻿@page "/contacts"
+@inject AppState State
+@implements IDisposable
+
+<div class="pane-scroll">
+    <div class="pane-narrow">
+        <div class="pane-head" style="padding-left:0;padding-right:0;">
+            <h2><i class="bi bi-people"></i> Contacts</h2>
+            <span class="muted">decide whose agent may talk to yours</span>
+        </div>
+
+        <div class="add-row">
+            <input @bind="handle" @bind:event="oninput" @onkeydown="OnAddKey" list="contact-handles" placeholder="Add someone by their handle…" aria-label="Contact handle" />
+            <datalist id="contact-handles">
+                @foreach (var h in KnownHandles) { <option value="@h" /> }
+            </datalist>
+            <button class="primary" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(handle)"><i class="bi bi-person-plus"></i> Add</button>
+        </div>
+
+        @if (State.Profile.Requests.Count > 0)
+        {
+            <div class="pane-head" style="padding-left:0;padding-right:0;">
+                <h2><i class="bi bi-inbox"></i> Requests</h2>
+                <span class="muted">people who reached out but aren't approved yet</span>
+            </div>
+            <div class="card-panel">
+                @foreach (var r in State.Profile.Requests.ToList())
+                {
+                    <div class="list-row">
+                        <div class="row-main">
+                            <div class="row-title">@("@" + r.From)</div>
+                            <div class="row-sub">@Truncate(r.Body, 140)</div>
+                        </div>
+                        <div class="row-actions">
+                            <button class="primary" title="Allow this contact" @onclick="() => AllowRequest(r)"><i class="bi bi-check-lg"></i> Allow</button>
+                            <button class="ghost" title="Block this contact" @onclick="() => BlockRequest(r)"><i class="bi bi-slash-circle"></i> Block</button>
+                            <button class="icon-btn" title="Dismiss" @onclick="() => DismissRequest(r)" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="card-panel">
+            @foreach (var c in State.Profile.Contacts)
+            {
+                <div class="list-row">
+                    <div class="row-main">
+                        <div class="row-title">@Name(c)</div>
+                        <div class="row-sub">@("@" + c.Handle)</div>
+                        <div class="chip-row" style="margin-top:6px;">
+                            <div class="ab-switch" role="group" aria-label="Allowed or blocked">
+                                <button class="ab-opt @(c.Allowed && !c.Blocked ? "on-allow" : "")" @onclick="() => SetAllowed(c)" title="This contact's agent may talk to yours">
+                                    <i class="bi bi-check-circle"></i> Allowed
+                                </button>
+                                <button class="ab-opt @(c.Blocked ? "on-block" : "")" @onclick="() => SetBlocked(c)" title="Drop this contact's messages entirely">
+                                    <i class="bi bi-slash-circle"></i> Blocked
+                                </button>
+                            </div>
+                            @if (c.Allowed && !c.Blocked)
+                            {
+                                <label class="chip @(c.Muted ? "on" : "")" title="No popup notifications for this contact">
+                                    <input type="checkbox" checked="@c.Muted" @onchange="e => ToggleMuted(c, e)" />
+                                    <i class="bi bi-bell-slash"></i> Muted
+                                </label>
+                                @foreach (var circle in State.Profile.Circles)
+                                {
+                                    <label class="chip @(c.Circles.Contains(circle.Name) ? "on" : "")">
+                                        <input type="checkbox" checked="@c.Circles.Contains(circle.Name)" @onchange="e => ToggleCircle(c, circle.Name, e)" />
+                                        @circle.Name
+                                    </label>
+                                }
+                            }
+                        </div>
+                    </div>
+                    <div class="row-actions">
+                        <button class="icon-btn" title="Remove" @onclick="() => Remove(c)" aria-label="Remove contact"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            }
+            @if (State.Profile.Contacts.Count == 0)
+            {
+                <div class="empty">No contacts yet. Add someone by their handle above.</div>
+            }
+        </div>
+
+        <div class="pane-head" style="padding-left:0;padding-right:0;">
+            <h2><i class="bi bi-diagram-3"></i> Circles</h2>
+            <span class="muted">group contacts &amp; control approval per group</span>
+        </div>
+
+        <div class="add-row">
+            <input @bind="newCircle" @bind:event="oninput" @onkeydown="OnCircleKey" placeholder="New circle name…" aria-label="New circle name" />
+            <button class="primary" @onclick="AddCircle" disabled="@string.IsNullOrWhiteSpace(newCircle)"><i class="bi bi-plus-lg"></i> Add circle</button>
+        </div>
+
+        <div class="card-panel">
+            @foreach (var circle in State.Profile.Circles)
+            {
+                <div class="list-row">
+                    <div class="row-main">
+                        @if (editingCircle == circle.Name)
+                        {
+                            <input @bind="editCircleName" style="max-width:220px;" aria-label="Circle name" />
+                        }
+                        else
+                        {
+                            <div class="row-title">@circle.Name</div>
+                            <div class="row-sub">@(circle.RequireApproval ? "you approve replies to this circle" : "auto-replies to this circle")</div>
+                        }
+                    </div>
+                    <label class="switch" title="Require approval"><input type="checkbox" checked="@circle.RequireApproval" @onchange="e => ToggleApproval(circle, e)" aria-label="Require approval" /></label>
+                    <div class="row-actions">
+                        @if (editingCircle == circle.Name)
+                        {
+                            <button class="icon-btn" title="Save" @onclick="() => SaveCircle(circle)" aria-label="Save"><i class="bi bi-check-lg"></i></button>
+                            <button class="icon-btn" title="Cancel" @onclick="() => editingCircle = null" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                        }
+                        else
+                        {
+                            <button class="icon-btn" title="Rename" @onclick="() => BeginEditCircle(circle)" aria-label="Rename"><i class="bi bi-pencil"></i></button>
+                            <button class="icon-btn" title="Delete" @onclick="() => DeleteCircle(circle)" aria-label="Delete circle"><i class="bi bi-trash"></i></button>
+                        }
+                    </div>
+                </div>
+            }
+            @if (State.Profile.Circles.Count == 0)
+            {
+                <div class="empty">No circles yet. Create one above to group contacts and set approval per group.</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    string handle = "";
+    string newCircle = "";
+    string? editingCircle;
+    string editCircleName = "";
+
+    protected override void OnInitialized() => State.Changed += Refresh;
+    void Refresh() => InvokeAsync(StateHasChanged);
+
+    string Name(Contact c) => string.IsNullOrWhiteSpace(c.DisplayName) ? c.Handle : c.DisplayName!;
+
+    // Handles offered for autocomplete: existing contacts plus anyone in a conversation.
+    IEnumerable<string> KnownHandles => State.Profile.Contacts.Select(c => c.Handle)
+        .Concat(State.Profile.Conversations.Select(c => c.Handle))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(h => h);
+
+    void OnAddKey(KeyboardEventArgs e) { if (e.Key == "Enter") Add(); }
+    void OnCircleKey(KeyboardEventArgs e) { if (e.Key == "Enter") AddCircle(); }
+
+    void Add()
+    {
+        if (string.IsNullOrWhiteSpace(handle)) return;
+        var norm = AppState.Norm(handle);
+        State.Mutate(p =>
+        {
+            if (!p.Contacts.Any(c => c.Handle == norm))
+                p.Contacts.Add(new Contact { Handle = norm });
+        });
+        handle = "";
+    }
+
+    // Allowed and Blocked are mutually exclusive: setting one clears the other.
+    void SetAllowed(Contact c)
+        => State.Mutate(_ => { c.Allowed = true; c.Blocked = false; });
+
+    void SetBlocked(Contact c)
+        => State.Mutate(_ => { c.Blocked = true; c.Allowed = false; });
+
+    void ToggleMuted(Contact c, ChangeEventArgs e)
+        => State.Mutate(_ => c.Muted = (bool)(e.Value ?? false));
+
+    // ---- request inbox ----
+    Contact GetOrCreateContact(string fromHandle)
+    {
+        var norm = AppState.Norm(fromHandle);
+        var existing = State.FindContact(norm);
+        if (existing is not null) return existing;
+        var c = new Contact { Handle = norm };
+        State.Mutate(p => p.Contacts.Add(c));
+        return c;
+    }
+
+    void AllowRequest(PendingRequest r)
+    {
+        var c = GetOrCreateContact(r.From);
+        State.Mutate(p => { c.Allowed = true; c.Blocked = false; p.Requests.Remove(r); });
+    }
+
+    void BlockRequest(PendingRequest r)
+    {
+        var c = GetOrCreateContact(r.From);
+        State.Mutate(p => { c.Blocked = true; c.Allowed = false; p.Requests.Remove(r); });
+    }
+
+    void DismissRequest(PendingRequest r) => State.Mutate(p => p.Requests.Remove(r));
+
+    static string Truncate(string s, int max)
+        => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
+
+    void ToggleCircle(Contact c, string circle, ChangeEventArgs e)
+        => State.Mutate(_ =>
+        {
+            if ((bool)(e.Value ?? false)) { if (!c.Circles.Contains(circle)) c.Circles.Add(circle); }
+            else c.Circles.Remove(circle);
+        });
+
+    void Remove(Contact c) => State.Mutate(p => p.Contacts.Remove(c));
+
+    void AddCircle()
+    {
+        var n = newCircle.Trim();
+        if (string.IsNullOrWhiteSpace(n)) return;
+        State.Mutate(p => { if (!p.Circles.Any(x => x.Name.Equals(n, StringComparison.OrdinalIgnoreCase))) p.Circles.Add(new Circle { Name = n }); });
+        newCircle = "";
+    }
+
+    void ToggleApproval(Circle circle, ChangeEventArgs e)
+        => State.Mutate(_ => circle.RequireApproval = (bool)(e.Value ?? false));
+
+    void BeginEditCircle(Circle circle) { editingCircle = circle.Name; editCircleName = circle.Name; }
+
+    void SaveCircle(Circle circle)
+    {
+        var newName = editCircleName.Trim();
+        if (string.IsNullOrWhiteSpace(newName)) { editingCircle = null; return; }
+        if (State.RenameCircle(circle.Name, newName))
+            editingCircle = null;
+    }
+
+    void DeleteCircle(Circle circle) => State.DeleteCircle(circle.Name);
+
+    public void Dispose() => State.Changed -= Refresh;
+}

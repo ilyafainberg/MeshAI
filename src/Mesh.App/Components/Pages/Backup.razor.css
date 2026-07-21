@@ -1,0 +1,32 @@
+.path {
+    display: block;
+    margin-top: 8px;
+    word-break: break-all;
+    background: var(--bg-3);
+    border: 1px solid var(--stroke-1);
+    border-radius: var(--radius-s);
+    padding: 6px 8px;
+    font-size: .8rem;
+    color: var(--fg-1);
+    font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.ok-note {
+    color: var(--ok);
+    font-size: .85rem;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.restored {
+    font-size: .9rem;
+    margin: 0 0 12px;
+}
+
+.link-box {
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--stroke-1);
+}

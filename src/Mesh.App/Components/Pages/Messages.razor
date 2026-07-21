@@ -1,0 +1,952 @@
+﻿@page "/messages"
+@inject AppState State
+@inject MeshClient Mesh
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="split">
+    <div class="conv-list">
+        <h2>Messages</h2>
+        <div class="new-conv">
+            <input @bind="newHandle" @bind:event="oninput" @onkeydown="OnNewKey" list="msg-handles" placeholder="Add by handle…" aria-label="Add a conversation by handle" />
+            <datalist id="msg-handles">
+                @foreach (var h in KnownHandles) { <option value="@h" /> }
+            </datalist>
+            <button class="primary icon-primary" @onclick="StartConversation" title="Start conversation" aria-label="Start conversation"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <button class="ghost new-group-btn" @onclick="ShowGroupCreator" aria-expanded="@showGroupCreator">
+            <i class="bi bi-people"></i> New group
+        </button>
+        @if (showGroupCreator)
+        {
+            <section class="group-create" role="dialog" aria-labelledby="group-create-title" aria-describedby="group-create-note">
+                <h3 id="group-create-title"><i class="bi bi-people"></i> Create group</h3>
+                <label for="desktop-group-name">Group name</label>
+                <input id="desktop-group-name" @bind="groupName" @bind:event="oninput" placeholder="Project team" disabled="@creatingGroup" />
+                <label for="desktop-group-members">Member handles</label>
+                <textarea id="desktop-group-members" @bind="groupMembers" @bind:event="oninput" rows="2"
+                          placeholder="alex, sam" disabled="@creatingGroup"></textarea>
+                <p id="group-create-note" class="group-create-note">You are included. Add 1–@MaxOtherGroupMembers other people (@FanoutProtocol.MaxRecipients members maximum).</p>
+                @if (groupCreateError is not null)
+                {
+                    <p class="group-create-error" role="alert"><i class="bi bi-exclamation-circle"></i> @groupCreateError</p>
+                }
+                <div class="group-create-actions">
+                    <button class="primary" @onclick="CreateGroup" disabled="@creatingGroup">
+                        @if (creatingGroup) { <i class="bi bi-hourglass-split"></i> <span>Creating…</span> }
+                        else { <i class="bi bi-people"></i> <span>Create</span> }
+                    </button>
+                    <button class="ghost" @onclick="CancelGroupCreator" disabled="@creatingGroup">Cancel</button>
+                </div>
+            </section>
+        }
+        <div class="conversation-filters" role="group" aria-label="Filter conversations">
+            @foreach (var option in ConversationFilters)
+            {
+                <button type="button" class="@(conversationFilter == option.Value ? "active" : "")"
+                        aria-pressed="@(conversationFilter == option.Value)"
+                        @onclick="() => conversationFilter = option.Value">@option.Label</button>
+            }
+        </div>
+        <div class="conversation-order-list" @ref="threadListEl">
+            @foreach (var c in FilteredConversations)
+            {
+                <div class="conv-item @(c.Handle == active ? "active" : "")" data-thread-id="@c.Handle" @key="c.Handle" @onclick="() => Select(c.Handle)">
+                    <button class="conversation-grip" data-thread-grip type="button" title="Drag to reorder"
+                            aria-label="Drag @State.DisplayNameFor(c.Handle) to reorder; use Up or Down arrow from the keyboard"
+                            aria-keyshortcuts="ArrowUp ArrowDown"
+                            @onkeydown="e => OnConversationGripKey(e, c.Handle)"
+                            @onclick:stopPropagation="true">
+                        <i class="bi bi-grip-vertical"></i>
+                    </button>
+                    <span class="conv-name">@State.DisplayNameFor(c.Handle)</span>
+                    @if (c.IsGroup) { <span class="tag group-thread-tag"><i class="bi bi-people-fill"></i> group</span> }
+                    @if (c.IsService) { <span class="tag svc-thread-tag" title="A service you are talking to"><i class="bi bi-broadcast"></i> service</span> }
+                    @if (!c.IsGroup && !c.IsService && !IsAllowed(c.Handle)) { <span class="tag">not allowed</span> }
+                    @if (State.IsUnread(c.Handle)) { <span class="conv-unread" title="Unread message"></span> }
+                </div>
+            }
+        </div>
+        <div class="sr-only" aria-live="polite">@reorderStatus</div>
+        @if (!FilteredConversations.Any())
+        {
+            <div class="empty conv-empty">@FilterEmptyText</div>
+        }
+        @if (State.Profile.Approvals.Count > 0)
+        {
+            <div class="requests approvals">
+                <div class="req-head"><i class="bi bi-hourglass-split"></i> Awaiting your approval</div>
+                @foreach (var a in State.Profile.Approvals)
+                {
+                    <div class="req">
+                        <div class="req-from"><b>@State.DisplayNameFor(a.From)</b> asked:</div>
+                        <div class="req-body">@a.RequestBody</div>
+                        <div class="req-draft-label">Your agent drafted:</div>
+                        <textarea class="req-draft" value="@GetDraft(a)" @onchange="e => SetDraft(a, e)" rows="3" aria-label="Edit draft reply"></textarea>
+                        <div class="req-actions">
+                            <button class="primary" @onclick="() => Approve(a)"><i class="bi bi-send"></i> Approve &amp; send</button>
+                            <button class="ghost" @onclick="() => Reject(a)"><i class="bi bi-x-lg"></i> Reject</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        @if (State.Profile.Requests.Count > 0)
+        {
+            <div class="requests">
+                <div class="req-head"><i class="bi bi-person-plus"></i> Requests</div>
+                @foreach (var r in State.Profile.Requests)
+                {
+                    <div class="req">
+                        <div><b>@State.DisplayNameFor(r.From)</b>: @r.Body</div>
+                        <div class="req-actions">
+                            <button class="primary" @onclick="() => ApproveContact(r.From)">Allow</button>
+                            <button class="ghost" @onclick="() => Decline(r.From)">Decline</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="thread">
+        @if (active is null)
+        {
+            <div class="empty">Pick or start a conversation. Messages route through the relay to the other person's agent.</div>
+        }
+        else
+        {
+            var conv = State.GetOrCreateConversation(active);
+            <header class="pane-head">
+                <h2>@State.DisplayNameFor(active)</h2>
+                @if (conv.IsGroup)
+                {
+                    <span class="group-head-meta"><i class="bi bi-people-fill"></i> @GroupMemberSummary(conv)</span>
+                }
+                else if (conv.IsService)
+                {
+                    <span class="muted">public service - your messages go to its sandboxed agent</span>
+                    var svc = State.Profile.PublishedServices.FirstOrDefault(s => s.Id == conv.ServiceId);
+                    if (svc is not null)
+                    {
+                        <span class="contact-tokens" title="Tokens spent vs this service's lifetime budget">
+                            <i class="bi bi-coin"></i> @TokenFormat.SpentOfTotal(svc.SpentTokens, svc.TotalTokenBudget)
+                        </span>
+                    }
+                }
+                else
+                {
+                    <span class="muted">@(IsAllowed(active) ? "their agent can talk to yours" : "you can message them")</span>
+                    var spent = State.FindContact(active)?.TokensSpent ?? 0;
+                    if (spent > 0)
+                    {
+                        <span class="contact-tokens" title="Tokens this contact's requests have cost your agent">
+                            <i class="bi bi-coin"></i> @TokenFormat.ToMTokens(spent)
+                        </span>
+                    }
+                }
+                <div class="head-actions" style="margin-left:auto;">
+                    @if (confirmDelete == active)
+                    {
+                        <span class="muted">Delete this conversation?</span>
+                        <button class="ghost icon-btn" title="Clear messages only, keep the conversation" @onclick="ClearActive">Clear</button>
+                        <button class="danger" title="Delete the conversation and its history" @onclick="DeleteActive">Delete</button>
+                        <button class="ghost icon-btn" title="Cancel" @onclick="() => confirmDelete = null" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                    }
+                    else
+                    {
+                        <button class="ghost icon-btn" title="Report AI content" aria-label="Report AI content" @onclick="OpenReport"><i class="bi bi-flag"></i></button>
+                        <button class="ghost icon-btn" title="Delete conversation history" aria-label="Delete conversation history" @onclick="() => confirmDelete = active"><i class="bi bi-trash"></i></button>
+                    }
+                </div>
+            </header>
+            @if (!conv.IsGroup && State.FindContact(active)?.KeyChanged == true)
+            {
+                <div class="key-change-banner">
+                    <i class="bi bi-shield-exclamation"></i>
+                    <div class="kc-text">
+                        <strong>@State.DisplayNameFor(active)'s identity keys changed.</strong>
+                        Messages are held until you re-verify. Confirm out of band (in person, a call)
+                        that this is really them before trusting the new keys.
+                    </div>
+                    <button class="primary" @onclick="ReverifyActive" disabled="@reverifying">
+                        @(reverifying ? "Verifying…" : "Re-verify")
+                    </button>
+                </div>
+            }
+            <div class="messages" @ref="scrollEl">
+                <div class="messages-wrap">
+                    @foreach (var line in conv.Lines)
+                    {
+                        <div class="bubble @(line.Role == "user" ? "assistant" : "user")">
+                            <MessageContent Text="@line.Text" From="@InboundAuthor(conv, line)"
+                                            OnPin="html => PinWidget(html, line)" />
+                            <div class="msg-tag">
+                                <i class="bi @(conv.IsGroup || line.Via == "person" ? "bi-person" : "bi-robot")"></i> @TagLabel(conv, line)
+                                @if (queuedIds.Contains(line.Id))
+                                {
+                                    <span class="msg-status" title="Queued - will send after the current turn"><i class="bi bi-hourglass-split"></i> queued</span>
+                                }
+                                @if (line.Role == "assistant" && !string.IsNullOrEmpty(line.Status))
+                                {
+                                    var shownStatus = conv.IsGroup && line.Status == "delivered" ? "sent" : line.Status;
+                                    <span class="msg-status @shownStatus" title="@shownStatus">
+                                        @if (!conv.IsGroup && line.Status == "delivered") { <i class="bi bi-check2-all"></i> }
+                                        else if (line.Status == "sent") { <i class="bi bi-check2"></i> }
+                                        else if (conv.IsGroup && line.Status == "delivered") { <i class="bi bi-check2"></i> }
+                                        else if (line.Status == "failed") { <i class="bi bi-exclamation-circle"></i> }
+                                    </span>
+                                }
+                            </div>
+                        </div>
+                    }
+                    @if (ActiveIsService && State.IsAwaiting(active!))
+                    {
+                        <div class="bubble assistant"><div class="text muted svc-thinking">@State.DisplayNameFor(active!) is thinking<span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div>
+                    }
+                </div>
+            </div>
+            <div class="composer-area">
+                <div class="composer-inner">
+                    @if (pinHtml is not null)
+                    {
+                        <div class="pin-bar">
+                            <i class="bi bi-pin-angle"></i>
+                            <input @bind="pinName" placeholder="Name this widget…" @onkeydown="OnPinKey" aria-label="Name this widget" />
+                            <button class="primary" @onclick="ConfirmPin" disabled="@string.IsNullOrWhiteSpace(pinName)">Pin</button>
+                            <button class="ghost icon-btn" @onclick="() => { pinHtml = null; pinError = null; }" title="Cancel" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        @if (pinError is not null) { <p class="err-text" role="alert">@pinError</p> }
+                    }
+                    @if (selectedWidget is not null)
+                    {
+                        <div class="mode-chip">
+                            <i class="bi bi-window-stack"></i> @selectedWidget.Name
+                            <button class="chip-x" @onclick="RemoveSelectedWidget" title="Remove widget" aria-label="Remove @selectedWidget.Name"><i class="bi bi-x"></i></button>
+                        </div>
+                    }
+                    @if (ShowPreview)
+                    {
+                        <div class="composer-preview">
+                            <span class="preview-label"><i class="bi bi-eye"></i> preview</span>
+                            <div class="text md">@((MarkupString)Markdown.ToHtml(input))</div>
+                        </div>
+                    }
+                    @if (attachments.Count > 0)
+                    {
+                        <div class="attach-bar">
+                            @foreach (var a in attachments)
+                            {
+                                <span class="attach-chip">
+                                    <i class="bi @(a.Mime.StartsWith("image/") ? "bi-image" : "bi-file-earmark")"></i>
+                                    <span class="attach-name">@a.Name</span>
+                                    <span class="attach-size">@a.SizeLabel</span>
+                                    <button class="chip-x" @onclick="() => attachments.Remove(a)" title="Remove" aria-label="Remove attachment"><i class="bi bi-x"></i></button>
+                                </span>
+                            }
+                        </div>
+                    }
+                    <div class="composer">
+                        @if (!conv.IsService)
+                        {
+                            <div class="widget-picker-anchor">
+                                <button class="ghost icon-btn plus-btn @(showWidgetPicker ? "on" : "")"
+                                        @onclick="ToggleWidgetPicker" title="Choose a saved widget"
+                                        aria-label="Choose a saved widget" aria-haspopup="menu"
+                                        aria-expanded="@showWidgetPicker" aria-controls="messages-widget-picker">
+                                    <i class="bi bi-plus-lg"></i>
+                                </button>
+                                @if (showWidgetPicker)
+                                {
+                                    <div id="messages-widget-picker" class="widget-picker" role="menu" aria-label="Choose a saved widget">
+                                        @if (State.Profile.Widgets.Count == 0)
+                                        {
+                                            <div class="widget-picker-empty">No saved widgets yet</div>
+                                            <button class="widget-picker-item" role="menuitem" @onclick="OpenWidgets">
+                                                <i class="bi bi-window-stack"></i>
+                                                <span>Go to Widgets</span>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <div class="widget-picker-list">
+                                                @foreach (var widget in State.Profile.Widgets)
+                                                {
+                                                    <button class="widget-picker-item" role="menuitem" @onclick="() => SelectWidget(widget)" @key="widget.Id">
+                                                        <i class="bi bi-window-stack"></i>
+                                                        <span>@widget.Name</span>
+                                                    </button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <button class="ghost icon-btn plus-btn" @onclick="PickFile" disabled="@busy" title="Attach an image or document" aria-label="Attach an image or document">
+                            <i class="bi bi-paperclip"></i>
+                        </button>
+                        <textarea @ref="composerEl" @bind="input" @bind:event="oninput" rows="1" class="composer-input"
+                               placeholder="@Placeholder" aria-label="Message input"></textarea>
+                        @if (!ActiveIsService && !conv.IsGroup)
+                        {
+                            <div class="target-toggle" role="group" aria-label="Message target" title="Choose who receives this message">
+                                <button class="@(directMode ? "" : "on")" @onclick="() => directMode = false" disabled="@busy"
+                                        title="Send to their agent (it may auto-reply)">
+                                    <i class="bi bi-robot"></i> Agent
+                                </button>
+                                <button class="@(directMode ? "on" : "")" @onclick="() => directMode = true" disabled="@busy"
+                                        title="Send to them directly (no agent reply)">
+                                    <i class="bi bi-person"></i> Person
+                                </button>
+                            </div>
+                        }
+                        <button class="primary send-btn" @onclick="Send" disabled="@(string.IsNullOrWhiteSpace(input) && attachments.Count == 0 && selectedWidget is null)" title="Send" aria-label="Send"><i class="bi bi-send"></i></button>
+                    </div>
+                    @if (attachError is not null) { <p class="err-text">@attachError</p> }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<ReportDialog @ref="reportDialog" />
+
+@code {
+    string? active;
+    string? confirmDelete;
+    ReportDialog? reportDialog;
+    string input = "";
+    string newHandle = "";
+    bool showGroupCreator;
+    bool creatingGroup;
+    string groupName = "";
+    string groupMembers = "";
+    string? groupCreateError;
+    bool busy;
+    bool showWidgetPicker;
+    Widget? selectedWidget;
+    bool directMode;
+    string? pinHtml;
+    string pinName = "";
+    string? pinPrompt;
+    string? pinError;
+    string reorderStatus = "";
+    ElementReference scrollEl;
+    ElementReference composerEl;
+    ElementReference threadListEl;
+    Microsoft.JSInterop.DotNetObjectReference<Messages>? selfRef;
+    bool composerWired;
+    int lastCount = -1;
+    string? lastActive;
+    Dictionary<string, string> editedDrafts = new();
+
+    readonly List<StagedFile> attachments = new();
+    string? attachError;
+    const long MaxAttachmentBytes = 20L * 1024 * 1024;
+
+    // Tier-1 steerable input: messages the user submits while a send is in flight are queued
+    // (shown immediately as a "queued" line) and delivered in order after the current turn,
+    // never concurrently. queuedIds tracks which lines still render the "queued" marker.
+    readonly Queue<PendingMsg> pending = new();
+    readonly HashSet<string> queuedIds = new();
+
+    sealed record PendingMsg(
+        string Handle, ChatLine Line, string Text, List<StagedFile> Files, bool Direct, Widget? Widget,
+        bool ExpectedGroup, bool ExpectedService);
+
+    sealed record StagedFile(string Name, string Mime, string Base64, long Size)
+    {
+        public string SizeLabel => Human(Size);
+    }
+
+    bool ShowPreview => !string.IsNullOrWhiteSpace(input) && Markdown.LooksLikeMarkdown(input);
+
+    bool ActiveIsService => active is not null && State.FindConversation(active)?.IsService == true;
+    bool ActiveIsGroup => active is not null && State.FindConversation(active)?.IsGroup == true;
+
+    string Placeholder => ActiveIsGroup
+            ? $"Message {State.DisplayNameFor(active!)}…"
+        : ActiveIsService
+            ? $"Message {State.DisplayNameFor(active!)}…"
+            : directMode
+                ? $"Message {State.DisplayNameFor(active!)}…"
+                : $"Message {State.DisplayNameFor(active!)}'s Agent…";
+
+    protected override void OnInitialized()
+    {
+        State.Changed += Refresh;
+        Mesh.StateChanged += Refresh;
+
+        // Deep-link: /messages?to=handle opens that conversation (used by Search).
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var to = ParseQueryValue(uri.Query, "to");
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            var h = AppState.Norm(to!);
+            State.GetOrCreateConversation(h);
+            active = h;
+            State.MarkRead(h);
+        }
+
+        OpenPendingDeepLink();
+    }
+
+    // Opens a conversation a mesh:// deep link asked for (the router pre-created it and set the key).
+    void OpenReport()
+    {
+        if (active is null) return;
+        var conv = State.GetOrCreateConversation(active);
+        var target = conv.IsGroup ? $"group {State.DisplayNameFor(active)}"
+            : conv.IsService ? $"service {conv.ServiceName}" : $"chat with @{active}";
+        reportDialog?.Show(target, conv.Lines,
+            l => l.Role == "assistant" ? "me" : InboundAuthor(conv, l) ?? State.DisplayNameFor(active!),
+            State.CurrentModelKey(), conv.ServiceId);
+    }
+
+    void OpenPendingDeepLink()
+    {
+        var key = State.ConsumePendingOpen();
+        if (key is null) return;
+        if (State.FindConversation(key) is null) return;
+        active = key;
+        confirmDelete = null;
+        composerWired = false;
+        ClearSelectedWidget();
+        State.MarkRead(key);
+    }
+
+    static string? ParseQueryValue(string queryString, string key)
+    {
+        var q = queryString.TrimStart('?');
+        foreach (var pair in q.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var i = pair.IndexOf('=');
+            if (i < 0) continue;
+            if (Uri.UnescapeDataString(pair[..i]) == key)
+                return Uri.UnescapeDataString(pair[(i + 1)..]);
+        }
+        return null;
+    }
+    void Refresh()
+    {
+        if (State.PendingOpenConversation is not null) OpenPendingDeepLink();
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            selfRef = Microsoft.JSInterop.DotNetObjectReference.Create(this);
+
+        if (selfRef is not null)
+        {
+            try { await JS.InvokeVoidAsync("meshUI.threadReorder", threadListEl, selfRef); } catch { }
+        }
+
+        if (active is null) return;
+
+        if (!composerWired)
+        {
+            composerWired = true;
+            try { await JS.InvokeVoidAsync("meshUI.composer", composerEl, selfRef, 5); } catch { }
+            try { await JS.InvokeVoidAsync("meshPaste.attach", composerEl, selfRef); } catch { }
+        }
+
+        var count = State.GetOrCreateConversation(active).Lines.Count;
+        // Scroll on new messages or when switching into a conversation.
+        if (count != lastCount || active != lastActive)
+        {
+            lastCount = count;
+            lastActive = active;
+            try { await JS.InvokeVoidAsync("meshUI.scrollToBottom", scrollEl); } catch { }
+        }
+    }
+
+    /// <summary>Invoked from JS when the user presses Enter (without Shift) in the composer.</summary>
+    [Microsoft.JSInterop.JSInvokable]
+    public Task SendFromComposer() => Send();
+
+    [Microsoft.JSInterop.JSInvokable]
+    public Task ReorderThread(string draggedId, string targetId, bool before)
+    {
+        var from = State.Profile.Conversations.FindIndex(c => c.Handle == draggedId);
+        var target = State.Profile.Conversations.FindIndex(c => c.Handle == targetId);
+        if (from < 0 || target < 0 || from == target) return Task.CompletedTask;
+        var destination = target + (before ? 0 : 1);
+        if (from < destination) destination--;
+        State.ReorderConversation(draggedId, destination);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    async Task OnConversationGripKey(KeyboardEventArgs e, string handle)
+    {
+        if (e.Key is not ("ArrowUp" or "ArrowDown")) return;
+        var visible = FilteredConversations.ToList();
+        var index = visible.FindIndex(c => c.Handle == handle);
+        var targetIndex = e.Key == "ArrowUp" ? index - 1 : index + 1;
+        if (index < 0 || targetIndex < 0 || targetIndex >= visible.Count)
+        {
+            reorderStatus = $"{State.DisplayNameFor(handle)} cannot move further {(e.Key == "ArrowUp" ? "up" : "down")}.";
+            return;
+        }
+        await ReorderThread(handle, visible[targetIndex].Handle, before: e.Key == "ArrowUp");
+        var newPosition = State.Profile.Conversations.FindIndex(c => c.Handle == handle) + 1;
+        reorderStatus = $"{State.DisplayNameFor(handle)} moved to position {newPosition}.";
+    }
+
+    /// <summary>
+    /// Invoked from paste.js when a file is pasted into the composer. Stages the pasted bytes the
+    /// same way the attach button does (base64, sent inline with the message), then re-renders.
+    /// </summary>
+    [Microsoft.JSInterop.JSInvokable]
+    public Task OnPasteFile(string name, string mime, string base64)
+    {
+        attachError = null;
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            if (bytes.LongLength == 0) { attachError = "That file is empty."; }
+            else if (bytes.LongLength > MaxAttachmentBytes)
+            {
+                attachError = $"\"{name}\" is {Human(bytes.LongLength)}, over the {Human(MaxAttachmentBytes)} limit.";
+            }
+            else
+            {
+                var m = string.IsNullOrWhiteSpace(mime) ? GuessMime(name) : mime;
+                attachments.Add(new StagedFile(name, m, base64, bytes.LongLength));
+            }
+        }
+        catch { attachError = "Could not read the pasted file."; }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    bool IsAllowed(string handle) => State.FindContact(handle)?.Allowed == true;
+
+    // Handles offered for autocomplete when starting a conversation: contacts + existing threads.
+    IEnumerable<string> KnownHandles => State.Profile.Contacts.Select(c => c.Handle)
+        .Concat(State.Profile.Conversations.Where(c => !c.IsGroup).Select(c => c.Handle))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(h => h);
+
+    bool reverifying;
+
+    async Task ReverifyActive()
+    {
+        if (active is null || reverifying) return;
+        reverifying = true;
+        try { await Mesh.ReverifyContactAsync(active); }
+        finally { reverifying = false; }
+    }
+
+    void Select(string handle)
+    {
+        active = handle;
+        confirmDelete = null;
+        composerWired = false;
+        ClearSelectedWidget();
+        State.MarkRead(handle);
+    }
+
+    void ToggleWidgetPicker() => showWidgetPicker = !showWidgetPicker;
+    void SelectWidget(Widget widget) { selectedWidget = widget; showWidgetPicker = false; }
+    void RemoveSelectedWidget() => ClearSelectedWidget();
+    void ClearSelectedWidget() { selectedWidget = null; showWidgetPicker = false; }
+    void OpenWidgets() => Nav.NavigateTo("/widgets");
+
+    void ClearActive()
+    {
+        if (active is null) return;
+        State.ClearConversation(active);
+        confirmDelete = null;
+    }
+
+    void DeleteActive()
+    {
+        if (active is null) return;
+        var h = active;
+        active = null;
+        confirmDelete = null;
+        composerWired = false;
+        ClearSelectedWidget();
+        State.DeleteConversation(h);
+    }
+
+    async Task OnNewKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") StartConversation();
+        await Task.CompletedTask;
+    }
+
+    void StartConversation()
+    {
+        if (string.IsNullOrWhiteSpace(newHandle)) return;
+        active = AppState.Norm(newHandle);
+        composerWired = false;
+        ClearSelectedWidget();
+        State.GetOrCreateConversation(active);
+        newHandle = "";
+        State.Save();
+    }
+
+    async Task ResetComposer()
+    {
+        try { await JS.InvokeVoidAsync("meshUI.resetComposer", composerEl); } catch { }
+    }
+
+    // Bubble tag: whether a line was addressed to / came from the peer's AGENT or the peer person.
+    // Uses AddressedToAgent (addressee/author) rather than Via (routing channel), so an agent
+    // auto-reply that answers the human reads "to them" even though it travels on the agent channel.
+    string TagLabel(Conversation conv, ChatLine line)
+    {
+        if (conv.IsGroup)
+            return line.Role != "user" ? "me" : InboundAuthor(conv, line) ?? "member";
+        var mine = line.Role != "user"; // "assistant" role = my own message
+        var agent = line.AddressedToAgent;
+        if (mine) return agent ? "to their agent" : "to them";
+        return agent ? "their agent" : "them";
+    }
+
+    async Task PickFile()
+    {
+        attachError = null;
+        try
+        {
+            var file = await Microsoft.Maui.Storage.FilePicker.Default.PickAsync();
+            if (file is null) return;
+            using var stream = await file.OpenReadAsync();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            if (bytes.LongLength == 0) { attachError = "That file is empty."; return; }
+            if (bytes.LongLength > MaxAttachmentBytes)
+            {
+                attachError = $"\"{file.FileName}\" is {Human(bytes.LongLength)}, over the {Human(MaxAttachmentBytes)} limit.";
+                return;
+            }
+            var mime = string.IsNullOrWhiteSpace(file.ContentType) ? GuessMime(file.FileName) : file.ContentType;
+            attachments.Add(new StagedFile(file.FileName, mime, Convert.ToBase64String(bytes), bytes.LongLength));
+        }
+        catch (Exception ex) { attachError = "Couldn't attach that file: " + ex.Message; }
+    }
+
+    static string Human(long bytes)
+    {
+        string[] units = { "B", "KB", "MB", "GB" };
+        double size = bytes;
+        int u = 0;
+        while (size >= 1024 && u < units.Length - 1) { size /= 1024; u++; }
+        return $"{size:0.#} {units[u]}";
+    }
+
+    static string GuessMime(string name)
+    {
+        var ext = Path.GetExtension(name).ToLowerInvariant();
+        return ext switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".svg" => "image/svg+xml",
+            ".bmp" => "image/bmp",
+            ".pdf" => "application/pdf",
+            ".txt" or ".md" or ".log" or ".csv" => "text/plain",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".zip" => "application/zip",
+            ".json" => "application/json",
+            _ => "application/octet-stream"
+        };
+    }
+
+    async Task Send()
+    {
+        if (active is null) return;
+        if (string.IsNullOrWhiteSpace(input) && attachments.Count == 0 && selectedWidget is null) return;
+        var text = input;
+        var files = attachments.ToList();
+        var widget = selectedWidget;
+        input = "";
+        attachments.Clear();
+        selectedWidget = null;
+        showWidgetPicker = false;
+        _ = ResetComposer();
+
+        var direct = directMode;
+
+        var activeConv = State.FindConversation(active);
+        var isGroup = activeConv?.IsGroup == true;
+        var isService = activeConv?.IsService == true;
+        if (isGroup) direct = true;
+        else if (isService) { direct = false; widget = null; }
+
+        var via = direct ? "person" : "agent";
+        var line = new ChatLine
+        {
+            Role = "assistant", Text = text, Via = via, AddressedToAgent = !direct,
+            SenderHandle = isGroup ? AppState.Norm(State.Profile.Handle) : null,
+            WidgetPrompt = widget?.Prompt
+        };
+        State.AddChatLine(active, line);
+
+        // A send is already running: queue this one for the next turn instead of starting a
+        // second concurrent send. The line is already visible; mark it "queued" until delivered.
+        if (busy)
+        {
+            queuedIds.Add(line.Id);
+            pending.Enqueue(new PendingMsg(active, line, text, files, direct, widget, isGroup, isService));
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await DeliverAsync(active, line, text, files, direct, widget, isGroup, isService);
+
+            // Drain anything queued while the turn(s) above ran, in order, one at a time.
+            while (pending.Count > 0)
+            {
+                var next = pending.Dequeue();
+                queuedIds.Remove(next.Line.Id);
+                await DeliverAsync(
+                    next.Handle, next.Line, next.Text, next.Files, next.Direct, next.Widget,
+                    next.ExpectedGroup, next.ExpectedService);
+            }
+        }
+        catch (Exception ex)
+        {
+            State.AddChatLine(active!, new ChatLine { Role = "assistant", Text = $"[error: {ex.Message}]" });
+        }
+        finally { busy = false; }
+    }
+
+    // Finalizes a bubble's text (saved widget + attachments) and sends it to the peer, reusing
+    // the line's stable id so delivery receipts update the right bubble.
+    async Task DeliverAsync(
+        string handle, ChatLine line, string text, List<StagedFile> files, bool direct, Widget? widget,
+        bool expectedGroup, bool expectedService)
+    {
+        var conv = State.FindConversation(handle);
+        if (expectedGroup && conv?.IsGroup != true)
+        {
+            State.SetLineStatus(line.Id, "failed");
+            return;
+        }
+        if (expectedService && conv?.IsService != true)
+        {
+            State.SetLineStatus(line.Id, "failed");
+            return;
+        }
+        if (conv?.IsService == true)
+        {
+            line.Status = "sent";
+            await Mesh.SendServiceRequestAsync(conv);
+            return;
+        }
+
+        var toSend = text;
+        if (widget is not null)
+        {
+            line.WidgetPrompt = widget.Prompt;
+            var widgetHtml = WidgetForSend(widget.Html);
+            toSend = string.IsNullOrWhiteSpace(toSend) ? widgetHtml : $"{toSend.TrimEnd()}\n\n{widgetHtml}";
+        }
+
+        if (files.Count > 0)
+        {
+            var sb = new System.Text.StringBuilder(toSend ?? "");
+            foreach (var f in files)
+            {
+                if (sb.Length > 0) sb.Append("\n\n");
+                sb.Append(Markdown.FileBlock(f.Name, f.Mime, f.Base64));
+            }
+            toSend = sb.ToString();
+        }
+
+        State.SetLineText(line.Id, toSend); // "assistant" = me, rendered right
+        if (conv?.IsGroup == true)
+        {
+            var ok = await Mesh.SendGroupMessageAsync(conv, toSend, line.Id);
+            line.Status = ok ? "sent" : "failed";
+            State.Save();
+            return;
+        }
+        var kind = direct ? MeshKinds.DirectMessage : MeshKinds.Chat;
+        await Mesh.SendAsync(handle, kind, toSend, line.Id);
+    }
+
+    static string WidgetForSend(string html)
+    {
+        var value = html.Trim();
+        return value.StartsWith("```html-app", StringComparison.OrdinalIgnoreCase)
+            ? value
+            : $"```html-app\n{value}\n```";
+    }
+
+    enum ConversationFilter { All, Chats, Groups, Services }
+    readonly record struct FilterOption(ConversationFilter Value, string Label);
+    static readonly FilterOption[] ConversationFilters =
+    [
+        new(ConversationFilter.All, "All"),
+        new(ConversationFilter.Chats, "Chats"),
+        new(ConversationFilter.Groups, "Groups"),
+        new(ConversationFilter.Services, "Services")
+    ];
+    ConversationFilter conversationFilter;
+    IEnumerable<Conversation> FilteredConversations => State.Profile.Conversations.Where(c => conversationFilter switch
+    {
+        ConversationFilter.Chats => !c.IsGroup && !c.IsService,
+        ConversationFilter.Groups => c.IsGroup,
+        ConversationFilter.Services => c.IsService,
+        _ => true
+    });
+    string FilterEmptyText => conversationFilter switch
+    {
+        ConversationFilter.Chats => "No chats yet.",
+        ConversationFilter.Groups => "No groups yet.",
+        ConversationFilter.Services => "No services yet.",
+        _ => "No conversations yet. Add someone by their handle above to start one."
+    };
+
+    int MemberCount(Conversation conv) => conv.GroupMembers.Count;
+
+    string GroupMemberSummary(Conversation conv)
+    {
+        var members = conv.GroupMembers
+            .Take(5)
+            .Select(h => "@" + AppState.Norm(h))
+            .ToList();
+        var remaining = MemberCount(conv) - members.Count;
+        var more = remaining > 0 ? $" · +{remaining} more" : "";
+        return $"{MemberCount(conv)} members · {string.Join(", ", members)}{more}";
+    }
+
+    string? InboundAuthor(Conversation conv, ChatLine line)
+    {
+        if (line.Role != "user") return null;
+        if (!conv.IsGroup) return State.DisplayNameFor(conv.Handle);
+        return string.IsNullOrWhiteSpace(line.SenderHandle)
+            ? "Group member"
+            : State.DisplayNameFor(AppState.Norm(line.SenderHandle));
+    }
+
+    void ShowGroupCreator()
+    {
+        showGroupCreator = true;
+        groupCreateError = null;
+    }
+
+    void CancelGroupCreator()
+    {
+        if (creatingGroup) return;
+        showGroupCreator = false;
+        groupName = "";
+        groupMembers = "";
+        groupCreateError = null;
+    }
+
+    async Task CreateGroup()
+    {
+        groupCreateError = null;
+        var name = groupName.Trim();
+        var members = ParseGroupMembers().ToList();
+        if (name.Length == 0) { groupCreateError = "Enter a group name."; return; }
+        if (members.Count == 0) { groupCreateError = "Add at least one other person."; return; }
+        if (members.Count > MaxOtherGroupMembers) { groupCreateError = $"A group can include at most {MaxOtherGroupMembers} other people."; return; }
+
+        creatingGroup = true;
+        try
+        {
+            var conv = await Mesh.CreateGroupAsync(name, members);
+            active = conv.Handle;
+            composerWired = false;
+            ClearSelectedWidget();
+            State.MarkRead(conv.Handle);
+            CancelGroupCreator();
+        }
+        catch (Exception ex) { groupCreateError = ex.Message; }
+        finally { creatingGroup = false; }
+        if (groupCreateError is null) CancelGroupCreator();
+    }
+
+    IEnumerable<string> ParseGroupMembers()
+    {
+        var me = AppState.Norm(State.Profile.Handle);
+        return groupMembers.Split(new[] { ',', ';', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(h => AppState.Norm(h.Trim().TrimStart('@')))
+            .Where(h => h.Length > 0 && !string.Equals(h, me, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    int MaxOtherGroupMembers => FanoutProtocol.MaxRecipients - 1;
+
+    void PinWidget(string html, ChatLine line) { pinHtml = html; pinName = ""; pinPrompt = line.WidgetPrompt; pinError = null; }
+    void OnPinKey(KeyboardEventArgs e) { if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(pinName)) ConfirmPin(); }
+    void ConfirmPin()
+    {
+        if (pinHtml is null || string.IsNullOrWhiteSpace(pinName)) return;
+        var name = pinName.Trim();
+        if (State.Profile.Widgets.Any(w => string.Equals(w.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            pinError = $"A widget named \"{name}\" already exists. Choose a different name.";
+            return;
+        }
+        State.Mutate(p => p.Widgets.Add(new Widget
+        {
+            Name = name,
+            Html = pinHtml!,
+            Prompt = pinPrompt ?? "Pinned from conversation",
+            Visibility = "private",
+            ModifiedAt = DateTimeOffset.UtcNow,
+        }));
+        pinHtml = null; pinName = ""; pinPrompt = null; pinError = null;
+    }
+
+    // ---- approvals (human-in-the-loop) ----
+    string GetDraft(PendingApproval a) => editedDrafts.TryGetValue(a.Id, out var v) ? v : a.DraftReply;
+    void SetDraft(PendingApproval a, ChangeEventArgs e) => editedDrafts[a.Id] = e.Value?.ToString() ?? "";
+
+    async Task Approve(PendingApproval a)
+    {
+        var edited = GetDraft(a);
+        await Mesh.ApproveDraftAsync(a.Id, edited);
+        editedDrafts.Remove(a.Id);
+        active = a.From;
+        ClearSelectedWidget();
+    }
+
+    void Reject(PendingApproval a)
+    {
+        Mesh.RejectDraft(a.Id);
+        editedDrafts.Remove(a.Id);
+    }
+
+    // ---- contact requests (unknown senders) ----
+    void ApproveContact(string from)
+    {
+        State.Mutate(p =>
+        {
+            var c = State.FindContact(from);
+            if (c is null) { c = new Contact { Handle = from, Allowed = true }; p.Contacts.Add(c); }
+            else c.Allowed = true;
+            p.Requests.RemoveAll(r => r.From == from);
+        });
+        active = from;
+        ClearSelectedWidget();
+    }
+
+    void Decline(string from) => State.Mutate(p => p.Requests.RemoveAll(r => r.From == from));
+
+    public void Dispose()
+    {
+        State.Changed -= Refresh;
+        Mesh.StateChanged -= Refresh;
+        selfRef?.Dispose();
+    }
+}

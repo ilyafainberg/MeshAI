@@ -1,0 +1,163 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <TargetFrameworks>net10.0-android</TargetFrameworks>
+        <TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+
+        <!-- Note for MacCatalyst:
+            The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
+            When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
+            The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
+            either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
+        <!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Mesh.App</RootNamespace>
+        <UseMaui>true</UseMaui>
+        <SingleProject>true</SingleProject>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <EnableDefaultCssItems>false</EnableDefaultCssItems>
+        <Nullable>enable</Nullable>
+
+        <!-- Enable XAML source generation for faster build times and improved performance.
+             This generates C# code from XAML at compile time instead of runtime inflation.
+             To disable, remove this line.
+             For individual files, you can override by setting Inflator metadata:
+               <MauiXaml Update="MyPage.xaml" Inflator="Default" /> (reverts to defaults: Runtime for Debug, XamlC for Release)
+               <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
+        <MauiXamlInflator>SourceGen</MauiXamlInflator>
+
+        <!-- Display name -->
+        <ApplicationTitle>Mesh</ApplicationTitle>
+
+        <!-- App Identifier -->
+        <ApplicationId>net.meshrelay.mesh</ApplicationId>
+
+        <!-- Win32 icon embedded into Mesh.App.exe so the executable and its shortcuts
+             show the Mesh sphere (MauiIcon only skins the running window/taskbar). -->
+        <ApplicationIcon>Platforms\Windows\appicon.ico</ApplicationIcon>
+
+        <!-- Versions -->
+        <ApplicationDisplayVersion>1.7.0</ApplicationDisplayVersion>
+        <ApplicationVersion>48</ApplicationVersion>
+        <!-- Drives AssemblyVersion/FileVersion/InformationalVersion, read by the self-updater. -->
+        <Version>1.7.0</Version>
+
+        <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
+        <WindowsPackageType>None</WindowsPackageType>
+
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+        <CodesignEntitlements>Platforms\iOS\Entitlements.plist</CodesignEntitlements>
+    </PropertyGroup>
+
+    <!-- MainPage references the Razor-generated Routes component. On iOS, runtime inflation
+         defers that type lookup until Razor components have been generated and loaded. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+        <MauiXaml Update="MainPage.xaml" Inflator="Runtime" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Platform storefront artwork also becomes the installed app icon. -->
+        <MauiIcon Include="Resources\AppIcon\Android\meshicon.png" BaseSize="512,512" Color="#131316"
+                  Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'" />
+        <MauiIcon Include="Resources\AppIcon\iOS\meshicon.png" BaseSize="1024,1024" Color="#131316"
+                  Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'" />
+        <MauiIcon Include="Resources\AppIcon\MacCatalyst\meshicon.png" BaseSize="1024,1024" Color="#131316"
+                  Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'" />
+        <MauiIcon Include="Resources\AppIcon\Windows\meshicon.png" BaseSize="1024,1024" Color="#131316"
+                  Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
+
+        <!-- Splash Screen -->
+        <MauiSplashScreen Include="Resources\AppIcon\meshicon.png" Color="#131316" BaseSize="180,180" />
+
+        <!-- Images -->
+        <MauiImage Include="Resources\Images\*" />
+        <MauiImage Update="Resources\Images\dotnet_bot.svg" BaseSize="168,208" />
+
+        <!-- Custom Fonts -->
+        <MauiFont Include="Resources\Fonts\*" />
+
+        <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+        <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+        <PackageReference Include="Markdig" Version="1.3.2" />
+        <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
+        <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+        <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
+        <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+        <PackageReference Include="Microsoft.Identity.Client" Version="4.85.2" />
+        <PackageReference Include="Microsoft.Identity.Client.Broker" Version="4.85.2"
+                          Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
+        <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+        <PackageReference Include="PdfPig" Version="0.1.15" />
+        <PackageReference Include="QRCoder" Version="1.8.0" />
+        <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.9" />
+        <PackageReference Include="ZXing.Net.Maui.Controls" Version="0.10.3" />
+    </ItemGroup>
+
+    <!-- Keep the Playwright managed API available for shared source compilation on iOS, but
+         exclude its build targets so desktop Node executables/scripts are never copied into
+         the signed iOS app bundle. Mobile browser tools already use platform-native fallbacks. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+        <PackageReference Include="Microsoft.Playwright" Version="1.61.0"
+                          ExcludeAssets="build;buildTransitive" />
+    </ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'ios'">
+        <PackageReference Include="Microsoft.Playwright" Version="1.61.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Mesh.Shared\Mesh.Shared.csproj" />
+    </ItemGroup>
+
+    <!-- Windows-only: system tray icon support + the tray icon asset next to the exe. -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+        <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+        <Content Include="Platforms\Windows\mesh-tray.png" Link="mesh-tray.png">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <!--
+      Windows-only: ship the bundled TotalControl MCP server (desktop control) next to the app under
+      mcp/totalcontrol so McpServerRegistry can find and launch it. The server is published separately
+      into _deploy/totalcontrol (see _deploy/publish-totalcontrol.ps1); this target copies that output
+      into the build output. If the staged server is missing, the build still succeeds (the tool just
+      shows as "not installed" until the server is published).
+    -->
+    <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+        <TotalControlFiles Include="$(MSBuildProjectDirectory)\..\..\_deploy\totalcontrol\**\*.*" />
+    </ItemGroup>
+    <Target Name="CopyTotalControl" AfterTargets="Build"
+            Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' And '@(TotalControlFiles)' != ''">
+        <Copy SourceFiles="@(TotalControlFiles)"
+              DestinationFiles="@(TotalControlFiles->'$(OutDir)mcp\totalcontrol\%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+    </Target>
+
+    <!-- Publish writes to $(PublishDir), not $(OutDir); copy the bundled server there too so
+         self-contained releases ship TotalControl. -->
+    <Target Name="CopyTotalControlPublish" AfterTargets="Publish"
+            Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' And '@(TotalControlFiles)' != ''">
+        <Copy SourceFiles="@(TotalControlFiles)"
+              DestinationFiles="@(TotalControlFiles->'$(PublishDir)mcp\totalcontrol\%(RecursiveDir)%(Filename)%(Extension)')"
+              SkipUnchangedFiles="true" />
+    </Target>
+
+</Project>

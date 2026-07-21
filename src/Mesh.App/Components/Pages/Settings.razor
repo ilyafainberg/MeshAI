@@ -1,0 +1,1428 @@
+@page "/settings"
+@inject AppState State
+@inject MeshClient Mesh
+@inject MsalAuthService Msal
+@inject FoundryLocalService Foundry
+@inject CopilotAcpHost Copilot
+@inject ModelSetupService Setup
+@inject IHttpClientFactory HttpFactory
+@inject UpdateService Updater
+@inject IAppControl AppControl
+@implements IDisposable
+
+<div class="pane-scroll">
+    <div class="pane-narrow">
+        <div class="pane-head" style="padding-left:0;padding-right:0;">
+            <h2><i class="bi bi-gear"></i> Settings</h2>
+        </div>
+
+        <div class="card-panel">
+            <h3>Identity</h3>
+            <div class="field-row">
+                <div><div class="field-label">Handle</div><div class="field-sub">how others add you</div></div>
+                <b>@State.Profile.Handle</b>
+            </div>
+            <div class="field">
+                <label>Display name</label>
+                <input class="full" value="@display" @onchange="OnDisplayChanged" />
+                <div class="field-hint">Shown to your contacts instead of your handle. Saved automatically.</div>
+            </div>
+            <h3>Link a device</h3>
+            <div class="field-hint" style="margin-bottom:12px;">
+                Add your phone or another computer to the same handle. On the other device, choose
+                <b>Link an existing device</b> and enter this code. Single-use, expires in 5&nbsp;minutes.
+            </div>
+            @if (linkCode is null)
+            {
+                <button class="ghost" disabled="@linkWorking" @onclick="CreateInvite">
+                    @(linkWorking ? "Generating..." : "Generate link code")
+                </button>
+                @if (linkError is not null) { <p class="err">@linkError</p> }
+            }
+            else
+            {
+                <div class="link-invite">
+                    @if (qrDataUri is not null)
+                    {
+                        <img class="link-qr" src="@qrDataUri" alt="Link QR code" />
+                    }
+                    <div class="link-code-box">
+                        <code class="link-code">@linkCode</code>
+                        <div class="field-sub">Expires in @remaining s</div>
+                    </div>
+                </div>
+                <button class="ghost" @onclick="ClearInvite">Done</button>
+            }
+            <h3>Identities on this device</h3>
+            <div class="field-hint" style="margin-bottom:12px;">
+                Keep several handles on this device and switch between them without signing out of any.
+            </div>
+            <div class="account-list">
+                @foreach (var a in State.Accounts)
+                {
+                    var isActive = a.Id == State.ActiveAccountId;
+                    <div class="account-row @(isActive ? "active" : "")">
+                        <div class="account-info">
+                            <i class="bi bi-person-circle"></i>
+                            <div class="account-text">
+                                <b>@("@")@a.Handle</b>
+                                @if (!string.IsNullOrWhiteSpace(a.DisplayName) && a.DisplayName != a.Handle)
+                                {
+                                    <small class="muted">@a.DisplayName</small>
+                                }
+                            </div>
+                        </div>
+                        <div class="account-actions">
+                            @if (isActive)
+                            {
+                                <span class="vis shared">current</span>
+                            }
+                            else
+                            {
+                                <button class="ghost" disabled="@switching" @onclick="() => Switch(a)">Switch</button>
+                            }
+                            <button class="icon-btn" title="Copy a shareable link to this handle" aria-label="Copy share link" @onclick="() => ShareHandle(a)"><i class="bi bi-share"></i></button>
+                            @if (copiedHandle == a.Handle)
+                            {
+                                <span class="vis shared" title="Link copied to clipboard">copied</span>
+                            }
+                            @if (deleteId == a.Id)
+                            {
+                                <button class="danger" @onclick="() => DeleteAccount(a)">Delete</button>
+                                <button class="ghost icon-btn" @onclick="() => deleteId = null" title="Cancel" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                            }
+                            else
+                            {
+                                <button class="icon-btn" title="Remove from this device" @onclick="() => deleteId = a.Id" aria-label="Remove from this device"><i class="bi bi-trash"></i></button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <h3>Sign out</h3>
+            <div class="field-hint" style="margin-bottom:12px;">
+                Sign out of <b>@("@")@State.Profile.Handle</b> and return to the account picker. Your identity
+                stays saved on this device, you can switch back anytime, or add / link another handle.
+                Nothing is deleted.
+            </div>
+            @if (!confirmSignOut)
+            {
+                <button class="ghost" @onclick="() => confirmSignOut = true">
+                    <i class="bi bi-box-arrow-right"></i> Sign out / switch identity
+                </button>
+            }
+            else
+            {
+                <div class="confirm-row">
+                    <span class="muted">Sign out of @("@")@State.Profile.Handle? It stays saved on this device.</span>
+                    <button class="primary" disabled="@signingOut" @onclick="SignOut">
+                        @(signingOut ? "Signing out…" : "Sign out")
+                    </button>
+                    <button class="ghost" disabled="@signingOut" @onclick="() => confirmSignOut = false">Cancel</button>
+                </div>
+            }
+        </div>
+
+        <div class="card-panel">
+            <h3>Model</h3>
+            <div class="field">
+                <label>Provider</label>
+                <select class="full" value="@provider" @onchange="OnProviderChange">
+                    <option value="MeshHosted">Mesh free model (no key)</option>
+                    <option value="Anthropic">Anthropic (Claude)</option>
+                    <option value="OpenAI">OpenAI</option>
+                    <option value="Gemini">Google Gemini</option>
+                    <option value="Grok">Grok (xAI)</option>
+                    <option value="Groq">Groq (fast inference)</option>
+                    <option value="OpenRouter">OpenRouter</option>
+                    <option value="AzureOpenAI">Azure OpenAI</option>
+                    @if (!PlatformCaps.IsMobile)
+                    {
+                        <option value="FoundryLocal">On Device</option>
+                        @if (OperatingSystem.IsWindows())
+                        {
+                            <option value="Browser">Browser model (scripted)</option>
+                        }
+                        <option value="GitHubCopilot">GitHub Copilot CLI (ACP)</option>
+                    }
+                </select>
+            </div>
+
+            @if (provider == "MeshHosted")
+            {
+                <div class="field">
+                    <div class="connector-note">
+                        <i class="bi bi-gift"></i>
+                        <span>The Mesh free model runs on a shared Mesh-hosted model, no API key needed. There is a daily token budget, so it can pause once that budget is used up for the day. Switch to your own key@(PlatformCaps.IsMobile ? "" : " or an on-device model") for unlimited use.</span>
+                    </div>
+                </div>
+            }
+            else if (provider == "GitHubCopilot")
+            {
+                <div class="field">
+                    <div class="connector-note">
+                        <i class="bi bi-github"></i>
+                        <span>Desktop only. Uses your installed and signed-in GitHub Copilot CLI through ACP. Mesh does not store a GitHub token. Copilot native tools stay disabled; enabled Mesh tools remain available with their Mesh approval settings.</span>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Copilot command</label>
+                    <input class="full" @bind="copilotExecutable" placeholder="copilot" autocomplete="off" />
+                    <div class="field-hint">Use <code>copilot</code> when it is on PATH, or enter the full path to the executable or command file. Run <code>copilot login</code> in a terminal first.</div>
+                </div>
+                <div class="field">
+                    <label>Model</label>
+                    <div class="model-row">
+                        <select class="full" value="@CopilotModelSelectValue" @onchange="OnCopilotModelSelect">
+                            @if (copilotModels.Count == 0)
+                            {
+                                <option value="auto">Automatic (Copilot chooses)</option>
+                            }
+                            @foreach (var option in copilotModels)
+                            {
+                                <option value="@option.Id" disabled="@(!option.Enabled)">@CopilotModelLabel(option)</option>
+                            }
+                            <option value="__custom__">Custom model ID...</option>
+                        </select>
+                        <button class="ghost icon-btn" title="Refresh Copilot model list"
+                                @onclick="() => LoadCopilotModelsAsync(force: true)"
+                                disabled="@loadingCopilotModels"
+                                aria-label="Refresh Copilot model list">
+                            <i class="bi @(loadingCopilotModels ? "bi-hourglass-split" : "bi-arrow-repeat")"></i>
+                        </button>
+                    </div>
+                    @if (copilotModelIsCustom)
+                    {
+                        <input class="full" style="margin-top:8px;" @bind="model" placeholder="Model ID, for example gpt-5.4" />
+                    }
+                    <div class="field-hint">The list comes from the installed CLI and reflects models enabled for your Copilot account. Automatic lets Copilot choose.</div>
+                    @if (!string.IsNullOrWhiteSpace(copilotModelsError))
+                    {
+                        <div class="err-text" role="alert">@copilotModelsError</div>
+                    }
+                </div>
+                <div class="field">
+                    <label>Reasoning effort</label>
+                    <select class="full" @bind="copilotEffort">
+                        <option value="Auto">Auto (Copilot default)</option>
+                        <option value="None">None</option>
+                        <option value="Minimal">Minimal</option>
+                        <option value="Low">Low</option>
+                        <option value="Medium">Medium</option>
+                        <option value="High">High</option>
+                        <option value="XHigh">Extra high</option>
+                        <option value="Max">Maximum</option>
+                    </select>
+                    <div class="field-hint">Changing the model or effort restarts the local ACP process for the next response.</div>
+                </div>
+            }
+            else if (provider == "FoundryLocal")
+            {
+                    <div class="field">
+                        <label>Model</label>
+                        <div class="model-row">
+                            <select class="full" @bind="model">
+                                @if (!string.IsNullOrWhiteSpace(model) && !foundryModels.Any(m => m.Id == model))
+                                {
+                                    <option value="@model">@model (current)</option>
+                                }
+                                @foreach (var m in foundryModels)
+                                {
+                                    <option value="@m.Id">@m.Label</option>
+                                }
+                            </select>
+                            <button class="ghost icon-btn" title="Refresh model list" @onclick="RefreshModels" disabled="@loadingModels" aria-label="Refresh model list">
+                                <i class="bi @(loadingModels ? "bi-hourglass-split" : "bi-arrow-repeat")"></i>
+                            </button>
+                        </div>
+                    <div class="field-hint">
+                        Runs on this device, no key, no cost. Only tool-capable models are listed.
+                        Your pick is downloaded and started automatically when you Save (first time can take a while).
+                    </div>
+                    <div class="field-hint star-note">
+                        <span class="stars">★★★★★</span> = most capable. More stars mean a bigger, smarter model that needs better hardware (more RAM/CPU); fewer stars run faster on modest machines.
+                    </div>
+                    @if (loadingModels)
+                    {
+                        <div class="field-hint"><i class="bi bi-hourglass-split"></i> Finding on-device models…</div>
+                    }
+                    else if (foundryModels.Count == 0)
+                    {
+                        <div class="connector-note">
+                            <i class="bi bi-cpu"></i>
+                            <span>Couldn't list on-device models yet. Foundry Local will be installed and started when you Save; smaller models load fastest.</span>
+                        </div>
+                    }
+                </div>
+            }
+            else if (provider == "Browser")
+            {
+                <div class="field">
+                    <div class="connector-note">
+                        <i class="bi bi-window"></i>
+                        <span>Windows only. Mesh opens a dedicated persistent browser on first use in every Mesh session. Sign in, return to Mesh, and select OK. Scripts run inside the provider page and can read anything rendered there.</span>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Browser</label>
+                    <select class="full" @bind="browserEngine">
+                        <option value="Firefox">Firefox (recommended)</option>
+                        <option value="Chrome">Chrome</option>
+                        <option value="Edge">Edge</option>
+                    </select>
+                    <div class="field-hint">Firefox uses Playwright Firefox. Chrome and Edge use their installed Playwright channels.</div>
+                </div>
+                <div class="field">
+                    <label>Preset file</label>
+                    <InputFile OnChange="LoadBrowserPreset" accept=".json,application/json" />
+                    <div class="field-hint">Load a .json browser-provider preset. Review its scripts before saving because presets contain executable JavaScript.</div>
+                    @if (!string.IsNullOrWhiteSpace(browserPresetStatus))
+                    {
+                        <div class="field-hint">@browserPresetStatus</div>
+                    }
+                </div>
+                <div class="field">
+                    <label>Start URL</label>
+                    <input class="full" @bind="browserUrl" placeholder="https://example.com/chat" />
+                </div>
+                <div class="field">
+                    <label>Context sent to website</label>
+                    <select class="full" @bind="browserContextMode">
+                        <option value="CurrentTurn">Current user message only</option>
+                        <option value="FullPrompt">Full Mesh prompt and history</option>
+                    </select>
+                    <div class="field-hint">Current turn keeps context separately in Mesh and in the website conversation. Use one website conversation per Mesh thread to avoid mixing contexts.</div>
+                </div>
+                <div class="field">
+                    <label>Execute prompt</label>
+                    <textarea class="full" rows="7" @bind="browserExecuteScript" spellcheck="false"></textarea>
+                    <div class="field-hint">Async JavaScript function accepting request: prompt, systemPrompt, messages, skills, tools, metadata.</div>
+                </div>
+                <div class="field">
+                    <label>Poll for response</label>
+                    <textarea class="full" rows="6" @bind="browserPollScript" spellcheck="false"></textarea>
+                    <div class="field-hint">Runs every 5 seconds by default. Return true/false or status: pending, complete, authentication-required, error.</div>
+                </div>
+                <div class="field">
+                    <label>Get result</label>
+                    <textarea class="full" rows="6" @bind="browserResultScript" spellcheck="false"></textarea>
+                    <div class="field-hint">Return a string or an object such as { text: "reply" }.</div>
+                </div>
+                <div class="field-row">
+                    <div class="field"><label>Poll seconds</label><input type="number" min="1" max="60" @bind="browserPollSeconds" /></div>
+                    <div class="field"><label>Timeout minutes</label><input type="number" min="1" max="120" @bind="browserTimeoutMinutes" /></div>
+                </div>
+            }
+            else if (provider == "OpenRouter")
+            {
+                <div class="field">
+                    <div class="connector-note">
+                        <i class="bi bi-shuffle"></i>
+                        <span>OpenRouter picks the model and provider based on your OpenRouter account settings. Mesh just sends your key and lets OpenRouter route, so there is no model to choose here.</span>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>API key</label>
+                    <input class="full" type="password" @bind="apiKey" placeholder="(unchanged)" />
+                </div>
+            }
+            else
+            {
+                @if (CatalogOptions.Count > 0)
+                {
+                    <div class="field">
+                        <label>Model</label>
+                        <select class="full" value="@ModelSelectValue" @onchange="OnModelSelect">
+                            @foreach (var opt in CatalogOptions)
+                            {
+                                <option value="@opt.Id">@opt.Label</option>
+                            }
+                            <option value="__custom__">Custom...</option>
+                        </select>
+                        @if (modelIsCustom)
+                        {
+                            <input class="full" style="margin-top:8px;" @bind="model" placeholder="@ModelPlaceholder" />
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="field">
+                        <label>@(provider == "AzureOpenAI" ? "Deployment name" : "Model")</label>
+                        <input class="full" @bind="model" placeholder="@ModelPlaceholder" />
+                    </div>
+                }
+                @if (provider == "OpenAI")
+                {
+                    <div class="field">
+                        <label>Endpoint <span class="muted">(optional)</span></label>
+                        <input class="full" @bind="endpoint" placeholder="https://api.openai.com" />
+                    </div>
+                }
+                @if (provider == "AzureOpenAI")
+                {
+                    <div class="field">
+                        <label>Endpoint</label>
+                        <input class="full" @bind="endpoint" placeholder="https://your-resource.openai.azure.com" />
+                        <div class="field-hint">Your Azure OpenAI resource URL. The Deployment name above is your model deployment, not the base model name.</div>
+                    </div>
+                    <div class="field">
+                        <label>API version <span class="muted">(optional)</span></label>
+                        <input class="full" @bind="apiVersion" placeholder="leave blank for the current API" />
+                        <div class="field-hint">Leave blank to use Azure OpenAI's current API (recommended). Only set a dated version (e.g. 2024-10-21) if your resource requires the older deployment API.</div>
+                    </div>
+                }
+                <div class="field">
+                    <label>API key</label>
+                    <input class="full" type="password" @bind="apiKey" placeholder="(unchanged)" />
+                </div>
+            }
+
+            @if (provider is not "MeshHosted" and not "Browser" and not "FoundryLocal" and not "GitHubCopilot")
+            {
+                <div class="field">
+                    <label>Reasoning effort</label>
+                    <select class="full" @bind="reasoningEffort">
+                        <option value="Auto">Auto (model default)</option>
+                        <option value="Low">Low (faster)</option>
+                        <option value="Medium">Medium (balanced)</option>
+                        <option value="High">High (deeper reasoning)</option>
+                    </select>
+                    <div class="field-hint">Controls reasoning intensity separately from the response length. The selected model must support this setting.</div>
+                </div>
+            }
+
+            <div class="field" style="margin-top:8px;">
+                <button class="primary" @onclick="ChangeModel" disabled="@Setup.Running">
+                    <i class="bi bi-check-lg"></i> @(Setup.Running ? "Working…" : "Change model")
+                </button>
+                @if (Setup.Running)
+                {
+                    <div class="setup-status running" style="margin-top:12px;">
+                        <span class="spinner"></span>
+                        <span>@(Setup.Status ?? "Working…")</span>
+                    </div>
+                }
+                else if (Setup.Success is not null)
+                {
+                    <div class="setup-status @(Setup.Success == true ? "ok" : "err")" style="margin-top:12px;">
+                        <i class="bi @(Setup.Success == true ? "bi-check-circle" : "bi-exclamation-triangle")"></i>
+                        <span>@Setup.Status</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="card-panel">
+            <h3>Usage report</h3>
+            <div class="field" style="margin-top:4px;">
+                <label>Token usage</label>
+                <TokenMeter />
+                <div class="tm-actions" style="margin-top:8px;">
+                    <button class="ghost" @onclick="ResetCounter"><i class="bi bi-arrow-counterclockwise"></i> Reset counter</button>
+                </div>
+                <div class="field-hint">
+                    Counts reset automatically when you switch models. The free hosted model has a daily
+                    token budget, so it can pause once that budget is used up for the day.
+                </div>
+            </div>
+
+            <div class="field-row">
+                <div>
+                    <div class="field-label">Estimated spend</div>
+                    <div class="field-sub">Approximate cost of your usage, based on the model's published prices. Actual billing comes from your provider.</div>
+                </div>
+                <span>@SpendLabel</span>
+            </div>
+        </div>
+
+        <div class="card-panel">
+            <h3>Agent responses</h3>
+            <div class="field">
+                <label>Approval before replying</label>
+                <select class="full" value="@approvalMode" @onchange="OnApprovalChanged">
+                    <option value="Off">Auto-reply (no approval)</option>
+                    <option value="PerCircle">Approve per circle (uses circle settings)</option>
+                    <option value="All">Approve every reply</option>
+                </select>
+                <div class="field-hint">When on, your agent drafts a reply and waits for you on the Messages page before sending.</div>
+            </div>
+            <div class="field-row">
+                <div>
+                    <div class="field-label">Plan before acting</div>
+                    <div class="field-sub">Generate and show a concise action plan before each standard topic turn in Me. Uses an extra model request, so responses may take longer and use more MTokens or Copilot premium requests.</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox"
+                           checked="@State.Profile.PlanBeforeActing"
+                           @onchange="e => Toggle(p => p.PlanBeforeActing = (bool)(e.Value ?? false))"
+                           aria-label="Plan before acting in Me topics" />
+                </label>
+            </div>
+            <div class="field-row">
+                <div>
+                    <div class="field-label">Interactive apps</div>
+                    <div class="field-sub">Let agents send interactive mini-apps in messages. They run sandboxed and never auto-run.</div>
+                </div>
+                <label class="switch"><input type="checkbox" checked="@allowApps" @onchange="OnAllowAppsChanged" aria-label="Interactive apps" /></label>
+            </div>
+            <div class="field-row">
+                <div>
+                    <div class="field-label">Do not disturb</div>
+                    <div class="field-sub">Suppress all popup notifications. In-app badges still update.</div>
+                </div>
+                <label class="switch"><input type="checkbox" checked="@State.Profile.DoNotDisturb" @onchange="e => Toggle(p => p.DoNotDisturb = (bool)(e.Value ?? false))" aria-label="Do not disturb" /></label>
+            </div>
+            @if (PlatformCaps.CanHostHomeAgent)
+            {
+                <div class="field-row">
+                    <div>
+                        <div class="field-label">Answer my other devices</div>
+                        <div class="field-sub">Let your linked mobile devices use this desktop's agent and full local tools.</div>
+                    </div>
+                    <label class="switch"><input type="checkbox" checked="@State.Profile.ActAsRemoteAgent" @onchange="OnRemoteAgentChanged" aria-label="Answer my other devices" /></label>
+                </div>
+                <div class="field">
+                    <label>This device's name</label>
+                    <input class="full" value="@State.Profile.DeviceName" @onchange="OnDeviceNameChanged" />
+                    <div class="field-hint">Shown to your linked mobile devices.</div>
+                </div>
+                @if (registrationError is not null)
+                {
+                    <div class="err-text" role="alert">@registrationError</div>
+                }
+            }
+            else if (PlatformCaps.IsMobile)
+            {
+                <div class="field-row">
+                    <div>
+                        <div class="field-label">Home device</div>
+                        <div class="field-sub">Choose the desktop that answers Home Agent requests.</div>
+                    </div>
+                    <div class="home-device-row">
+                        <select class="field" value="@(HasValidHomeDevice ? State.Profile.HomeDeviceId : "")"
+                                @onchange="OnHomeDeviceChanged" aria-label="Home device">
+                            <option value="">Select a desktop</option>
+                            @foreach (var d in EligibleHomeDevices)
+                            {
+                                var label = (string.IsNullOrWhiteSpace(d.Name) ? d.DeviceId : d.Name)
+                                    + (d.Online ? " - online" : " - offline");
+                                <option value="@d.DeviceId" disabled="@(!d.Online)">@label</option>
+                            }
+                        </select>
+                        <button class="ghost" @onclick="LoadDevicesAsync" disabled="@loadingDevices" aria-label="Refresh devices"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+                    </div>
+                </div>
+                @if (HasStaleHomeDevice)
+                {
+                    <div class="err-text" role="alert">Your saved Home device is no longer available. Select an online desktop.</div>
+                }
+                else if (deviceDirectoryError is not null)
+                {
+                    <div class="err-text" role="alert">@deviceDirectoryError</div>
+                }
+                else if (!loadingDevices && EligibleHomeDevices.Count == 0)
+                {
+                    <div class="field-hint muted">No eligible desktop is available. Enable Answer my other devices on a linked desktop.</div>
+                }
+            }
+        </div>
+
+        <div class="card-panel">
+            <h3>Agent budget</h3>
+            <div class="field">
+                <label>Automatic replies per day</label>
+                <input class="full" type="number" min="0" value="@replyBudget" @onchange="OnBudgetChanged" />
+                <div class="field-hint">
+                    Cap how many automatic agent replies run per day. Each reply calls your model, so this protects
+                    your usage and cost. Set to 0 for unlimited.
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">Used today</div>
+                <span>@BudgetUsageLabel</span>
+            </div>
+        </div>
+
+        <div class="card-panel">
+            <h3>Relay</h3>
+            <div class="field">
+                <label>Relay URL</label>
+                <div class="model-row">
+                    <input class="full" value="@relay" @onchange="OnRelayChanged" aria-label="Relay URL" />
+                    <button class="ghost" @onclick="TestRelay" disabled="@testingRelay" title="Check this relay is reachable">
+                        @(testingRelay ? "Testing…" : "Test")
+                    </button>
+                </div>
+                @if (relayTestMsg is not null) { <div class="field-hint @(relayTestOk ? "" : "err-text")">@relayTestMsg</div> }
+                <div class="field-hint">
+                    The default relay is run by Mesh. You can run your own, or use anyone's:
+                    the relay is open source (see the About page). A handle is registered per relay,
+                    so switching relays re-registers your handle there. Changes apply automatically.
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">Status</div>
+                <span class="@(Mesh.Connected ? "on" : "off")">
+                    <i class="bi @(Mesh.Connected ? "bi-check-circle-fill" : "bi-circle")"></i>
+                    @(Mesh.Connected ? "connected" : "offline")
+                </span>
+            </div>
+        </div>
+
+        @if (Updater.IsSupported)
+        {
+        <div class="card-panel">
+            <h3>Updates</h3>
+            <div class="field-row">
+                <div class="field-label">Current version</div>
+                <span>@Updater.CurrentVersion.ToString(3)</span>
+            </div>
+
+            @if (updatePhase == UpdatePhase.Downloading || updatePhase == UpdatePhase.Extracting
+                 || updatePhase == UpdatePhase.Preparing || updatePhase == UpdatePhase.Applying)
+            {
+                <div class="field">
+                    <div class="update-progress-head">
+                        <span>@updateStatus</span>
+                        @if (updatePercent >= 0) { <span>@updatePercent%</span> }
+                    </div>
+                    <div class="progress-track" role="progressbar"
+                         aria-valuenow="@(updatePercent < 0 ? 0 : updatePercent)" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-fill @(updatePercent < 0 ? "indeterminate" : "")"
+                             style="@(updatePercent >= 0 ? $"width:{updatePercent}%" : "")"></div>
+                    </div>
+                    @if (updateBytesTotal > 0)
+                    {
+                        <div class="field-hint">@FormatMb(updateBytesReceived) of @FormatMb(updateBytesTotal) MB</div>
+                    }
+                </div>
+            }
+            else if (updateInfo is not null && updatePhase == UpdatePhase.ReadyToApply)
+            {
+                <div class="field">
+                    <div class="update-avail">Version @updateInfo.Version.ToString(3) is ready to install.</div>
+                    <div class="field-hint">Mesh will close and the installer will open to finish updating, then reopen Mesh. Save any unsaved work first.</div>
+                    <div class="model-row">
+                        <button class="primary" @onclick="ApplyUpdate">Install update</button>
+                        <button class="ghost" @onclick="DismissUpdate">Later</button>
+                    </div>
+                </div>
+            }
+            else if (updateInfo is not null && updateAvailable)
+            {
+                <div class="field">
+                    <div class="update-avail">
+                        <i class="bi bi-arrow-up-circle-fill"></i>
+                        Version @updateInfo.Version.ToString(3) is available.
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(updateInfo.ReleaseNotes))
+                    {
+                        <details class="update-notes">
+                            <summary>What's new</summary>
+                            <div class="notes-md">@((MarkupString)global::Mesh.App.Services.Markdown.ToHtml(updateInfo.ReleaseNotes))</div>
+                        </details>
+                    }
+                    <div class="model-row">
+                        <button class="primary" @onclick="DownloadUpdate">
+                            Download @(updateInfo.Size > 0 ? $"({FormatMb(updateInfo.Size)} MB)" : "")
+                        </button>
+                        @if (updateInfo.HtmlUrl is not null)
+                        {
+                            <button class="ghost" @onclick="() => OpenUrl(updateInfo.HtmlUrl)">View release</button>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="field">
+                    <div class="model-row">
+                        <button class="ghost" @onclick="CheckUpdate" disabled="@checkingUpdate">
+                            @(checkingUpdate ? "Checking…" : "Check for updates")
+                        </button>
+                    </div>
+                    @if (updateStatus is not null)
+                    {
+                        <div class="field-hint @(updateFailed ? "err-text" : "")">@updateStatus</div>
+                    }
+                </div>
+            }
+        </div>
+        }
+
+        @if (AppControl.IsLaunchAtStartupEnabled() || OperatingSystem.IsWindows())
+        {
+        <div class="card-panel">
+            <h3>Application</h3>
+            <div class="field-row">
+                <div>
+                    <div class="field-label">Launch at startup</div>
+                    <div class="field-sub">Start Mesh automatically when you sign in to Windows. It opens minimized to the system tray.</div>
+                </div>
+                <label class="switch"><input type="checkbox" checked="@launchAtStartup" @onchange="OnToggleStartup" aria-label="Launch at startup" /></label>
+            </div>
+        </div>
+        }
+
+    </div>
+</div>
+
+@code {
+    string display = "";
+    string relay = "";
+    string provider = "Anthropic";
+    string model = "";
+    string endpoint = "";
+    string apiKey = "";
+    string apiVersion = "";
+    string reasoningEffort = "Auto";
+    string copilotExecutable = "copilot";
+    string copilotEffort = "Auto";
+    string browserEngine = "Firefox";
+    string browserContextMode = "FullPrompt";
+    string browserPresetStatus = "";
+    string browserUrl = "";
+    string browserExecuteScript = "async request => {\n  // Enter request.prompt and submit it.\n  throw new Error('Configure Execute prompt');\n}";
+    string browserPollScript = "async state => {\n  // Return true when generation is complete.\n  return false;\n}";
+    string browserResultScript = "async state => {\n  // Return the final response text.\n  return { text: '' };\n}";
+    int browserPollSeconds = 5;
+    int browserTimeoutMinutes = 10;
+    string approvalMode = "PerCircle";
+    bool allowApps = true;
+    int replyBudget = 100;
+
+    string BudgetUsageLabel => replyBudget <= 0
+        ? "Unlimited"
+        : $"{State.Profile.AgentRepliesUsedToday} of {replyBudget}";
+
+    List<FoundryModel> foundryModels = new();
+    bool loadingModels;
+    List<CopilotModelOption> copilotModels = new();
+    bool loadingCopilotModels;
+    bool copilotModelIsCustom;
+    string? copilotModelsError;
+
+    string? linkCode;
+    string? qrDataUri;
+    string? linkError;
+    bool linkWorking;
+    int remaining;
+    System.Threading.Timer? linkTimer;
+
+    bool confirmSignOut;
+    bool signingOut;
+    bool switching;
+    string? deleteId;
+
+    // ---- local tools ----
+    // Moved to /tools page (Tools.razor). Methods below removed.
+
+    async Task SignOut()
+    {
+        signingOut = true;
+        try
+        {
+            await Mesh.DisconnectAsync();
+            State.SignOut(); // keeps the identity saved; returns app to the picker
+        }
+        finally { signingOut = false; }
+    }
+
+    async Task Switch(AccountRef a)
+    {
+        if (a.Id == State.ActiveAccountId || switching) return;
+        switching = true;
+        try
+        {
+            await Mesh.DisconnectAsync();
+            if (State.SwitchAccount(a.Id))
+            {
+                SyncFields();
+                await Mesh.RegisterAsync();
+                await Mesh.ConnectAsync();
+            }
+        }
+        finally { switching = false; }
+    }
+
+    // Copies a public, shareable web link to this handle to the clipboard (works for anyone: the
+    // meshrelay.net landing page bounces to the mesh:// deep link or offers install).
+    string? copiedHandle;
+    async Task ShareHandle(AccountRef a)
+    {
+        try
+        {
+            await Microsoft.Maui.ApplicationModel.DataTransfer.Clipboard.Default.SetTextAsync(UniversalLink.ForHandle(a.Handle));
+            copiedHandle = a.Handle;
+            StateHasChanged();
+            await Task.Delay(2000);
+            if (copiedHandle == a.Handle) { copiedHandle = null; StateHasChanged(); }
+        }
+        catch { /* clipboard is best-effort */ }
+    }
+
+    async Task DeleteAccount(AccountRef a)
+    {
+        deleteId = null;
+        var wasActive = a.Id == State.ActiveAccountId;
+
+        // Release the handle on the relay first, so the name is freed and can be re-created. Signed
+        // with this identity's own key: the relay only honors it if this device's key is the one
+        // registered under the handle (a stranded duplicate simply won't be authorized, which is
+        // correct, it never owned the name). Best-effort: a relay error still deletes locally.
+        var keys = State.PeekIdentityKeys(a.Id);
+        if (keys is { } k && !string.IsNullOrWhiteSpace(k.handle))
+            await Mesh.DeleteHandleAsync(k.handle, k.privateKey, k.publicKey);
+
+        if (wasActive) await Mesh.DisconnectAsync();
+        State.DeleteAccount(a.Id);
+        if (wasActive) SyncFields(); // active cleared → app shows the picker
+    }
+
+    // On mobile, Foundry Local (On Device) cannot run, so a persisted FoundryLocal profile is coerced
+    // to the safe hosted default for the UI. Saving keeps that coerced value.
+    string EffectiveProvider(ModelProvider pv)
+        => PlatformCaps.IsMobile && pv is ModelProvider.FoundryLocal or ModelProvider.GitHubCopilot
+            ? nameof(ModelProvider.MeshHosted)
+            : pv.ToString();
+
+    void SyncFields()
+    {
+        var p = State.Profile;
+        display = p.DisplayName;
+        relay = p.RelayUrl;
+        provider = EffectiveProvider(p.Model.Provider);
+        model = p.Model.Model;
+        endpoint = p.Model.Endpoint ?? "";
+        apiVersion = p.Model.ApiVersion ?? "";
+        reasoningEffort = p.Model.ReasoningEffort.ToString();
+        copilotExecutable = string.IsNullOrWhiteSpace(p.Model.CopilotExecutable) ? "copilot" : p.Model.CopilotExecutable;
+        copilotEffort = p.Model.CopilotEffort.ToString();
+        browserEngine = string.IsNullOrWhiteSpace(p.Model.BrowserEngine) ? "Firefox" : p.Model.BrowserEngine;
+        browserContextMode = string.Equals(p.Model.BrowserContextMode, "CurrentTurn", StringComparison.OrdinalIgnoreCase) ? "CurrentTurn" : "FullPrompt";
+        browserUrl = p.Model.BrowserUrl ?? "";
+        browserExecuteScript = p.Model.BrowserExecuteScript ?? browserExecuteScript;
+        browserPollScript = p.Model.BrowserPollScript ?? browserPollScript;
+        browserResultScript = p.Model.BrowserResultScript ?? browserResultScript;
+        browserPollSeconds = p.Model.BrowserPollSeconds;
+        browserTimeoutMinutes = p.Model.BrowserTimeoutMinutes;
+        approvalMode = p.ApprovalMode.ToString();
+        allowApps = p.AllowInteractiveApps;
+        replyBudget = p.AgentDailyReplyBudget;
+        SyncModelCustomFlag();
+    }
+
+    string ModelPlaceholder=> provider switch
+    {
+        "Anthropic" => "claude-sonnet-4-6",
+        "Gemini" => "gemini-1.5-flash",
+        "Grok" => "grok-2-latest",
+        "Groq" => "llama-3.3-70b-versatile",
+        "AzureOpenAI" => "my-gpt-4o-mini (deployment name)",
+        "GitHubCopilot" => "auto",
+        _ => "gpt-4o-mini"
+    };
+
+    // ---- model dropdown (curated catalog per provider) ----
+    bool modelIsCustom;
+
+    IReadOnlyList<ModelCatalog.ModelOption> CatalogOptions =>
+        Enum.TryParse<ModelProvider>(provider, out var pv) ? ModelCatalog.For(pv) : Array.Empty<ModelCatalog.ModelOption>();
+
+    // The <select> value: the current model id when it is in the catalog, else the Custom sentinel.
+    string ModelSelectValue =>
+        (!modelIsCustom && CatalogOptions.Any(o => o.Id == model)) ? model : "__custom__";
+
+    void OnModelSelect(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString() ?? "";
+        if (v == "__custom__") { modelIsCustom = true; }
+        else { modelIsCustom = false; model = v; }
+    }
+
+    // Keep the custom flag in sync when a provider/model is loaded or changed.
+    void SyncModelCustomFlag()
+    {
+        modelIsCustom = CatalogOptions.Count > 0 && !string.IsNullOrWhiteSpace(model) && !CatalogOptions.Any(o => o.Id == model);
+        copilotModelIsCustom = provider == "GitHubCopilot"
+            && !string.IsNullOrWhiteSpace(model)
+            && !copilotModels.Any(option => option.Id.Equals(model, StringComparison.OrdinalIgnoreCase));
+    }
+
+    static bool IsFoundryId(string id) =>
+        id.Contains("generic-cpu", StringComparison.OrdinalIgnoreCase) || id.Contains("-instruct-", StringComparison.OrdinalIgnoreCase);
+
+    protected override void OnInitialized()
+    {
+        State.Changed += Refresh;
+        Mesh.StateChanged += Refresh;
+        Setup.Changed += Refresh;
+        Foundry.ModelsChanged += Refresh;
+        var p = State.Profile;
+        display = p.DisplayName;
+        relay = p.RelayUrl;
+        provider = EffectiveProvider(p.Model.Provider);
+        model = p.Model.Model;
+        endpoint = p.Model.Endpoint ?? "";
+        apiVersion = p.Model.ApiVersion ?? "";
+        reasoningEffort = p.Model.ReasoningEffort.ToString();
+        copilotExecutable = string.IsNullOrWhiteSpace(p.Model.CopilotExecutable) ? "copilot" : p.Model.CopilotExecutable;
+        copilotEffort = p.Model.CopilotEffort.ToString();
+        browserEngine = string.IsNullOrWhiteSpace(p.Model.BrowserEngine) ? "Firefox" : p.Model.BrowserEngine;
+        browserUrl = p.Model.BrowserUrl ?? "";
+        browserExecuteScript = p.Model.BrowserExecuteScript ?? browserExecuteScript;
+        browserPollScript = p.Model.BrowserPollScript ?? browserPollScript;
+        browserResultScript = p.Model.BrowserResultScript ?? browserResultScript;
+        browserPollSeconds = p.Model.BrowserPollSeconds;
+        browserTimeoutMinutes = p.Model.BrowserTimeoutMinutes;
+        approvalMode = p.ApprovalMode.ToString();
+        allowApps = p.AllowInteractiveApps;
+        replyBudget = p.AgentDailyReplyBudget;
+        // Use the list cached at app startup, do NOT reload here (that would reset the selection).
+        foundryModels = Foundry.CachedModels.ToList();
+        SyncModelCustomFlag();
+
+        // Adopt any update already discovered by the background auto-check so the panel shows it
+        // immediately (for example when the user arrives here via the update banner).
+        if (Updater.Available is not null)
+        {
+            updateAvailable = true;
+            updateInfo = Updater.Available;
+        }
+        Updater.Changed += Refresh;
+
+        launchAtStartup = AppControl.IsLaunchAtStartupEnabled();
+    }
+
+    List<Mesh.Shared.DeviceInfo> devices = new();
+    IReadOnlyList<Mesh.Shared.DeviceInfo> EligibleHomeDevices => devices
+        .Where(d => d.IsEligibleHomeAgent && d.DeviceId != Mesh.MyDeviceId)
+        .OrderByDescending(d => d.Online)
+        .ThenBy(d => d.Name)
+        .ToList();
+    bool HasValidHomeDevice => EligibleHomeDevices.Any(d => d.DeviceId == State.Profile.HomeDeviceId && d.Online);
+    bool HasStaleHomeDevice => !string.IsNullOrWhiteSpace(State.Profile.HomeDeviceId) && !HasValidHomeDevice;
+    bool loadingDevices;
+    string? deviceDirectoryError;
+    string? registrationError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (PlatformCaps.IsMobile)
+            await LoadDevicesAsync();
+        if (provider == "GitHubCopilot")
+            await LoadCopilotModelsAsync();
+    }
+
+    async Task LoadDevicesAsync()
+    {
+        if (!PlatformCaps.IsMobile) return;
+        loadingDevices = true;
+        deviceDirectoryError = null;
+        try
+        {
+            devices = (await Mesh.ListMyDevicesAsync()).ToList();
+        }
+        catch
+        {
+            devices = new();
+            deviceDirectoryError = "Could not refresh linked devices. Check your relay connection.";
+        }
+        finally
+        {
+            loadingDevices = false;
+            StateHasChanged();
+        }
+    }
+
+    async Task OnRemoteAgentChanged(ChangeEventArgs e)
+    {
+        Toggle(p => p.ActAsRemoteAgent = (bool)(e.Value ?? false));
+        await RefreshRegistrationAsync();
+    }
+
+    async Task OnDeviceNameChanged(ChangeEventArgs e)
+    {
+        Toggle(p => p.DeviceName = (e.Value?.ToString() ?? string.Empty).Trim());
+        await RefreshRegistrationAsync();
+    }
+
+    async Task RefreshRegistrationAsync()
+    {
+        registrationError = null;
+        try
+        {
+            if (!await Mesh.RegisterAsync())
+                registrationError = "Could not update this device on the relay. Check your connection and try again.";
+        }
+        catch { registrationError = "Could not update this device on the relay. Check your connection and try again."; }
+    }
+
+    void OnHomeDeviceChanged(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString() ?? string.Empty;
+        var selected = EligibleHomeDevices.FirstOrDefault(d => d.DeviceId == id && d.Online);
+        Toggle(p => p.HomeDeviceId = selected?.DeviceId);
+    }
+
+    bool launchAtStartup;
+
+    void OnToggleStartup(ChangeEventArgs e)
+    {
+        launchAtStartup = (bool)(e.Value ?? false);
+        AppControl.SetLaunchAtStartup(launchAtStartup);
+    }
+    void Refresh()
+    {
+        // Keep the dropdown in sync if the startup preload finishes while Settings is open.
+        if (foundryModels.Count == 0 && Foundry.CachedModels.Count > 0)
+            foundryModels = Foundry.CachedModels.ToList();
+        InvokeAsync(StateHasChanged);
+    }
+
+    void OnProviderChange(ChangeEventArgs e)
+    {
+        provider = e.Value?.ToString() ?? "Anthropic";
+        if (provider == "MeshHosted")
+        {
+            model = ""; // the free model's id is chosen server-side
+        }
+        else if (provider == "Browser")
+        {
+            model = "browser";
+        }
+        else if (provider == "OpenRouter")
+        {
+            model = "openrouter/auto"; // OpenRouter routes by the user's account settings; client never pins a model
+        }
+        else if (provider == "GitHubCopilot")
+        {
+            model = "auto";
+            copilotExecutable = string.IsNullOrWhiteSpace(copilotExecutable) ? "copilot" : copilotExecutable;
+            copilotEffort = "Auto";
+            copilotModelIsCustom = false;
+            _ = LoadCopilotModelsAsync();
+        }
+        else if (provider == "FoundryLocal")
+        {
+            foundryModels = Foundry.CachedModels.ToList();
+            // Only pick a default when the current selection isn't an on-device model.
+            if (!IsFoundryId(model))
+                model = foundryModels.FirstOrDefault(m => m.Id == FoundryLocalService.DefaultModel)?.Id
+                        ?? foundryModels.FirstOrDefault()?.Id
+                        ?? FoundryLocalService.DefaultModel;
+        }
+        else if (IsFoundryId(model) || string.Equals(model, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            model = ""; // let the provider's placeholder show
+        }
+
+        // For providers with a curated catalog, default to the top model when the current id is not
+        // in the new provider's list, so the dropdown never lands on a stale/foreign model id.
+        if (ModelCatalog.HasCatalog(Enum.Parse<ModelProvider>(provider)))
+        {
+            var opts = CatalogOptions;
+            if (!opts.Any(o => o.Id == model)) model = opts[0].Id;
+        }
+        SyncModelCustomFlag();
+    }
+
+    string CopilotModelSelectValue
+        => !copilotModelIsCustom && copilotModels.Any(option => option.Id.Equals(model, StringComparison.OrdinalIgnoreCase))
+            ? copilotModels.First(option => option.Id.Equals(model, StringComparison.OrdinalIgnoreCase)).Id
+            : string.Equals(model, "auto", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(model)
+                ? "auto"
+                : "__custom__";
+
+    static string CopilotModelLabel(CopilotModelOption option)
+    {
+        var suffix = string.IsNullOrWhiteSpace(option.Usage) ? "" : $" ({option.Usage})";
+        return option.Name + suffix + (option.Enabled ? "" : " - unavailable");
+    }
+
+    void OnCopilotModelSelect(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "auto";
+        copilotModelIsCustom = value == "__custom__";
+        model = copilotModelIsCustom ? "" : value;
+    }
+
+    async Task LoadCopilotModelsAsync(bool force = false)
+    {
+        if (loadingCopilotModels || provider != "GitHubCopilot") return;
+        loadingCopilotModels = true;
+        copilotModelsError = null;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            copilotModels = (await Copilot.GetModelsAsync(
+                string.IsNullOrWhiteSpace(copilotExecutable) ? "copilot" : copilotExecutable.Trim(),
+                force)).ToList();
+            if (!copilotModels.Any(option => option.Id.Equals("auto", StringComparison.OrdinalIgnoreCase)))
+                copilotModels.Insert(0, new CopilotModelOption("auto", "Automatic", "Let Copilot choose", null, null, true));
+            SyncModelCustomFlag();
+        }
+        catch (Exception ex)
+        {
+            copilotModelsError = ex.Message;
+            copilotModels = new() { new CopilotModelOption("auto", "Automatic", "Let Copilot choose", null, null, true) };
+            SyncModelCustomFlag();
+        }
+        finally
+        {
+            loadingCopilotModels = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Manual refresh, the only place that re-queries the on-device catalog after startup.</summary>
+    async Task RefreshModels()
+    {
+        loadingModels = true;
+        await InvokeAsync(StateHasChanged);
+        try { await Foundry.PreloadModelsAsync(force: true); foundryModels = Foundry.CachedModels.ToList(); }
+        catch { /* leave existing list */ }
+        finally { loadingModels = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    async Task LoadBrowserPreset(InputFileChangeEventArgs e)
+    {
+        browserPresetStatus = "";
+        try
+        {
+            await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
+            using var document = await System.Text.Json.JsonDocument.ParseAsync(stream);
+            var root = document.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new InvalidOperationException("Preset root must be a JSON object.");
+
+            static string? Text(System.Text.Json.JsonElement root, string name)
+                => root.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? value.GetString() : null;
+            static int? Number(System.Text.Json.JsonElement root, string name)
+                => root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : null;
+
+            var url = Text(root, "startUrl") ?? Text(root, "url");
+            var execute = Text(root, "executePrompt");
+            var poll = Text(root, "pollForResponse");
+            var result = Text(root, "getResult");
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(execute)
+                || string.IsNullOrWhiteSpace(poll) || string.IsNullOrWhiteSpace(result))
+                throw new InvalidOperationException("Preset requires startUrl, executePrompt, pollForResponse, and getResult.");
+
+            browserUrl = url;
+            browserExecuteScript = execute;
+            browserPollScript = poll;
+            browserResultScript = result;
+            var engine = Text(root, "browser");
+            if (engine is not null && new[] { "Chrome", "Edge", "Firefox" }.Contains(engine, StringComparer.OrdinalIgnoreCase))
+                browserEngine = char.ToUpperInvariant(engine[0]) + engine[1..].ToLowerInvariant();
+            var contextMode = Text(root, "contextMode");
+            if (string.Equals(contextMode, "CurrentTurn", StringComparison.OrdinalIgnoreCase))
+                browserContextMode = "CurrentTurn";
+            else if (string.Equals(contextMode, "FullPrompt", StringComparison.OrdinalIgnoreCase))
+                browserContextMode = "FullPrompt";
+            browserPollSeconds = Math.Clamp(Number(root, "pollSeconds") ?? browserPollSeconds, 1, 60);
+            browserTimeoutMinutes = Math.Clamp(Number(root, "timeoutMinutes") ?? browserTimeoutMinutes, 1, 120);
+            browserPresetStatus = $"Loaded {e.File.Name}. Review the scripts, then select Change model.";
+        }
+        catch (Exception ex)
+        {
+            browserPresetStatus = "Could not load preset: " + ex.Message;
+        }
+    }
+
+    async Task ChangeModel()
+    {
+        var apiKeyToSet = apiKey;
+        apiKey = "";
+
+        // The save + model test runs in a background singleton, so it keeps going
+        // (and stays observable) even if the user navigates away from Settings. The non-model
+        // fields (display name, relay, approval, budget) auto-save on change; they are set here too
+        // so a single "Change model" also captures anything the user just edited.
+        Setup.SaveAndTest(p =>
+        {
+            p.DisplayName = display.Trim();
+            p.RelayUrl = relay.Trim();
+            p.Model.Provider = Enum.Parse<ModelProvider>(provider);
+            p.Model.Model = model.Trim();
+            p.Model.Endpoint = string.IsNullOrWhiteSpace(endpoint) ? null : endpoint.Trim();
+            p.Model.ApiVersion = string.IsNullOrWhiteSpace(apiVersion) ? null : apiVersion.Trim();
+            p.Model.ReasoningEffort = Enum.TryParse<ReasoningEffort>(reasoningEffort, out var effort) ? effort : ReasoningEffort.Auto;
+            p.Model.CopilotExecutable = string.IsNullOrWhiteSpace(copilotExecutable) ? "copilot" : copilotExecutable.Trim();
+            p.Model.CopilotEffort = Enum.TryParse<CopilotEffort>(copilotEffort, out var cliEffort) ? cliEffort : CopilotEffort.Auto;
+            p.Model.BrowserEngine = browserEngine;
+            p.Model.BrowserContextMode = browserContextMode;
+            p.Model.BrowserUrl = string.IsNullOrWhiteSpace(browserUrl) ? null : browserUrl.Trim();
+            p.Model.BrowserExecuteScript = browserExecuteScript;
+            p.Model.BrowserPollScript = browserPollScript;
+            p.Model.BrowserResultScript = browserResultScript;
+            p.Model.BrowserPollSeconds = Math.Clamp(browserPollSeconds, 1, 60);
+            p.Model.BrowserTimeoutMinutes = Math.Clamp(browserTimeoutMinutes, 1, 120);
+            if (!string.IsNullOrWhiteSpace(apiKeyToSet)) p.Model.ApiKey = apiKeyToSet.Trim();
+            p.ApprovalMode = Enum.Parse<ApprovalMode>(approvalMode);
+            p.AllowInteractiveApps = allowApps;
+            p.AgentDailyReplyBudget = replyBudget < 0 ? 0 : replyBudget;
+        });
+
+        // Model may have changed; start the live counter fresh for the newly selected model.
+        State.ResetTokenCounter();
+
+        await Mesh.RegisterAsync();
+    }
+
+    // ---- auto-save for non-model settings (persist immediately on change) ----
+    void OnDisplayChanged(ChangeEventArgs e)
+    {
+        display = e.Value?.ToString() ?? "";
+        Toggle(p => p.DisplayName = display.Trim());
+    }
+
+    void OnApprovalChanged(ChangeEventArgs e)
+    {
+        approvalMode = e.Value?.ToString() ?? "PerCircle";
+        Toggle(p => p.ApprovalMode = Enum.Parse<ApprovalMode>(approvalMode));
+    }
+
+    void OnAllowAppsChanged(ChangeEventArgs e)
+    {
+        allowApps = (bool)(e.Value ?? false);
+        Toggle(p => p.AllowInteractiveApps = allowApps);
+    }
+
+    void OnBudgetChanged(ChangeEventArgs e)
+    {
+        replyBudget = int.TryParse(e.Value?.ToString(), out var v) && v > 0 ? v : 0;
+        Toggle(p => p.AgentDailyReplyBudget = replyBudget);
+    }
+
+    async Task OnRelayChanged(ChangeEventArgs e)
+    {
+        relay = e.Value?.ToString() ?? "";
+        var url = relay.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return;
+        Toggle(p => p.RelayUrl = url);
+        // A handle is registered per relay, so switching relays re-registers there and reconnects.
+        try { await Mesh.RegisterAsync(); await Mesh.ConnectAsync(); } catch { }
+    }
+
+    // Estimated spend for the current model's live token counter (null when the model has no price).
+    string SpendLabel
+    {
+        get
+        {
+            var t = State.Profile.Tokens;
+            var cost = ModelCatalog.EstimateCost(State.Profile.Model.Model, t.PromptTokens, t.CompletionTokens);
+            return cost is null ? "N/A" : $"~${cost.Value:0.00}";
+        }
+    }
+
+    void ResetCounter() => State.ResetTokenCounter();
+
+    // ---- relay test ----
+    bool testingRelay;
+    bool relayTestOk;
+    string? relayTestMsg;
+
+    async Task TestRelay()
+    {
+        relayTestMsg = null;
+        var url = relay?.Trim();
+        if (string.IsNullOrWhiteSpace(url)) { relayTestOk = false; relayTestMsg = "Enter a relay URL first."; return; }
+        testingRelay = true;
+        try
+        {
+            var http = HttpFactory.CreateClient("relay");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var resp = await http.GetAsync($"{url.TrimEnd('/')}/health", cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                relayTestOk = true;
+                relayTestMsg = "Relay is reachable.";
+            }
+            else
+            {
+                relayTestOk = false;
+                relayTestMsg = $"Relay responded with {(int)resp.StatusCode}. Check the URL.";
+            }
+        }
+        catch (Exception ex)
+        {
+            relayTestOk = false;
+            relayTestMsg = $"Could not reach that relay: {ex.Message}";
+        }
+        finally { testingRelay = false; }
+    }
+
+    // ---- self-update ----
+    bool checkingUpdate;
+    bool updateAvailable;
+    bool updateFailed;
+    string? updateStatus;
+    UpdateInfo? updateInfo;
+    UpdatePhase updatePhase = UpdatePhase.Idle;
+    int updatePercent = -1;
+    long updateBytesReceived;
+    long updateBytesTotal;
+
+    static string FormatMb(long bytes) => (bytes / 1024.0 / 1024.0).ToString("N0");
+
+    async Task CheckUpdate()
+    {
+        checkingUpdate = true;
+        updateFailed = false;
+        updateStatus = null;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var result = await Updater.CheckAsync(cts.Token);
+            if (result.Available && result.Info is not null)
+            {
+                updateAvailable = true;
+                updateInfo = result.Info;
+                updatePhase = UpdatePhase.Idle;
+            }
+            else if (result.Error is not null)
+            {
+                updateFailed = true;
+                updateStatus = result.Error;
+            }
+            else
+            {
+                updateStatus = $"You're on the latest version ({Updater.CurrentVersion.ToString(3)}).";
+            }
+        }
+        catch (Exception ex)
+        {
+            updateFailed = true;
+            updateStatus = $"Update check failed: {ex.Message}";
+        }
+        finally { checkingUpdate = false; }
+    }
+
+    async Task DownloadUpdate()
+    {
+        if (updateInfo is null) return;
+        updateFailed = false;
+        updatePhase = UpdatePhase.Downloading;
+        updateBytesReceived = 0;
+        updateBytesTotal = updateInfo.Size;
+        updatePercent = updateInfo.Size > 0 ? 0 : -1;
+
+        var progress = new Progress<UpdateProgress>(p =>
+        {
+            updatePhase = p.Phase;
+            updateBytesReceived = p.BytesReceived;
+            updateBytesTotal = p.TotalBytes;
+            updatePercent = p.Percent;
+            updateStatus = p.Phase switch
+            {
+                UpdatePhase.Downloading => "Downloading update…",
+                UpdatePhase.Extracting => "Extracting…",
+                UpdatePhase.Preparing => "Preparing…",
+                UpdatePhase.ReadyToApply => "Ready to install",
+                _ => updateStatus
+            };
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            preparedUpdaterPath = await Updater.DownloadAndPrepareAsync(updateInfo, progress);
+            updatePhase = UpdatePhase.ReadyToApply;
+        }
+        catch (Exception ex)
+        {
+            updateFailed = true;
+            updatePhase = UpdatePhase.Idle;
+            updateStatus = $"Update download failed: {ex.Message}";
+        }
+    }
+
+    void ApplyUpdate()
+    {
+        if (preparedUpdaterPath is null) return;
+        updatePhase = UpdatePhase.Applying;
+        updateStatus = "Opening the installer…";
+        Updater.ApplyAndExit(preparedUpdaterPath);
+    }
+
+    void DismissUpdate()
+    {
+        updatePhase = UpdatePhase.Idle;
+        updateAvailable = false;
+        updateInfo = null;
+        preparedUpdaterPath = null;
+        updateStatus = null;
+    }
+
+    void OpenUrl(string url)
+    {
+        try { Microsoft.Maui.ApplicationModel.Launcher.OpenAsync(new Uri(url)); } catch { }
+    }
+
+    string? preparedUpdaterPath;
+
+    void Toggle(Action<Mesh.App.Domain.MeshProfile> change) => State.Mutate(change);
+
+    async Task CreateInvite()
+    {
+        linkError = null;
+        linkWorking = true;
+        try
+        {
+            if (!Uri.TryCreate(State.Profile.RelayUrl, UriKind.Absolute, out var relayUri) ||
+                (relayUri.Scheme != Uri.UriSchemeHttps && !(relayUri.Scheme == Uri.UriSchemeHttp && relayUri.IsLoopback)) ||
+                !string.IsNullOrEmpty(relayUri.UserInfo) || !string.IsNullOrEmpty(relayUri.Query) ||
+                !string.IsNullOrEmpty(relayUri.Fragment))
+            {
+                linkError = "A valid HTTPS relay URL is required before generating a device-link.";
+                return;
+            }
+            var ttl = TimeSpan.FromMinutes(5);
+            var (ok, code, err) = await Mesh.CreateLinkInviteAsync(ttl);
+            if (!ok || code is null) { linkError = err ?? "Could not create invite."; return; }
+            linkCode = code;
+            var pairingUrl = UniversalLink.ForPairing(State.Profile.Handle, code, State.Profile.RelayUrl);
+            qrDataUri = BuildQr(pairingUrl);
+            remaining = (int)ttl.TotalSeconds;
+            linkTimer = new System.Threading.Timer(_ =>
+            {
+                remaining--;
+                if (remaining <= 0) { ClearInvite(); }
+                InvokeAsync(StateHasChanged);
+            }, null, 1000, 1000);
+        }
+        catch (Exception ex) { linkError = ex.Message; }
+        finally { linkWorking = false; }
+    }
+
+    void ClearInvite()
+    {
+        linkTimer?.Dispose();
+        linkTimer = null;
+        linkCode = null;
+        qrDataUri = null;
+    }
+
+    // HTTPS opens from a normal Camera app; the landing page immediately hands off to Mesh.
+    string BuildQr(string payload)
+    {
+        using var gen = new QRCoder.QRCodeGenerator();
+        using var data = gen.CreateQrCode(payload, QRCoder.QRCodeGenerator.ECCLevel.Q);
+        var png = new QRCoder.PngByteQRCode(data).GetGraphic(6);
+        return "data:image/png;base64," + Convert.ToBase64String(png);
+    }
+
+    public void Dispose()
+    {
+        linkTimer?.Dispose();
+        State.Changed -= Refresh;
+        Setup.Changed -= Refresh;
+        Mesh.StateChanged -= Refresh;
+        Foundry.ModelsChanged -= Refresh;
+        Updater.Changed -= Refresh;
+    }
+}

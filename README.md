@@ -1,84 +1,79 @@
 # Mesh
 
-**Private messaging for you and your AI - end to end encrypted.**
+Peer-to-peer AI agent networking. Every person runs their own agent; other people's
+agents can talk to it, and the owner decides exactly who sees what.
 
-Mesh lets you message people and their AI agents directly. Your messages are
-end-to-end encrypted, so nobody in the middle can read them. Bring your own AI
-model, or use the free one that's built in.
+- **Client**: .NET 10 MAUI Blazor desktop + mobile app (Windows today, iOS/Android build clean).
+- **Relay**: ASP.NET Core SignalR service that routes end-to-end-encrypted messages between
+  handles. It never sees plaintext.
 
-<p align="center">
-  <a href="../../releases/latest"><b>⬇️ Download for Windows</b></a>
-</p>
+## What it does
 
----
+- **Identity**: pick a handle; a device signing keypair is generated locally and never leaves
+  the device. One handle can live on several devices.
+- **Messaging**: agents (and people) exchange messages over a SignalR transport, end-to-end
+  encrypted to the recipient's device keys, with trust-on-first-use key pinning.
+- **Private groups**: create human-only conversations with up to 128 members. The client encrypts
+  one opaque payload for all member devices; the relay performs stateless fan-out without storing
+  group IDs, names, roles or membership records.
+- **Your agent**: a private "Me" chat with full access to your knowledge, skills and tools; and
+  a guest surface where an approved contact's agent gets only what you have shared with their
+  circle (privacy by binding, not by instruction).
+- **Knowledge sources**: connect Microsoft 365, Google, Dropbox, Notion and Slack for live,
+  on-demand tools (nothing is bulk-copied).
+- **Local tools** (owner-gated, off by default, optionally shared with a circle): PowerShell,
+  CMD, Python, C# scripting, a Playwright browser, file read/write/convert, and WorkIQ (M365
+  Q&A). Plus bundled and custom **MCP tool servers** (e.g. TotalControl for desktop control).
+- **Free model**: a relay-hosted model so first-launch users get a working agent with no key of
+  their own, with a daily token budget. Bring your own key (Anthropic, OpenAI, Gemini, Grok,
+  Groq, Azure OpenAI) or run on-device with Foundry Local at any time.
+- **Move devices**: a passphrase-encrypted backup carries all your data plus a handle recovery
+  key (never your device signing keys). A new device imports it, mints its own key, and
+  re-authorizes under the same handle via device linking or recovery.
 
-## Get started in 2 minutes
+## Storage
 
-1. Go to the [**latest release**](../../releases/latest).
-2. Download **`Mesh-Setup-*.zip`**.
-3. Unzip it and run the installer inside. That's it - Mesh opens and walks you
-   through picking a handle.
+Each identity is one encrypted SQLCipher database (`identity-{id}.meshdb`). The master key lives
+in the platform secure enclave (DPAPI on Windows, Keychain on iOS, Keystore on Android). Chat
+history is stored as append-only rows so it scales.
 
-> **"Windows protected your PC"?** That message shows up for every new app that
-> isn't from a big vendor yet. Click **More info → Run anyway**. Mesh is safe and
-> open about what it does.
+## Layout
 
----
+```
+src/
+  Mesh.App/       MAUI Blazor client (UI, agent, tools, storage)
+  Mesh.Relay/     ASP.NET Core SignalR relay (Cosmos + Redis backing stores)
+  Mesh.Shared/    Wire contracts + shared crypto
+_smoke/           SignalR end-to-end smoke tests
+_hostedtest/      Hosted free-model tool-calling test
+_deploy/          Relay deploy + asset build scripts
+```
 
-## What can I do with it?
+## Build
 
-- 💬 **Message anyone** by their handle. Every message is end-to-end encrypted -
-  the server that delivers it can never read it.
-- 🤖 **Chat with your own AI agent**, and let friends' agents talk to yours.
-- 🧠 **Use any AI model.** Plug in OpenAI, Anthropic, Google, or a model running
-  on your own PC - or just use the free built-in one and start right away.
-- 🔔 **Get notified** the moment a message or an agent needs you.
-- 🔄 **Stays up to date automatically** - new versions install themselves.
+```powershell
+# Client (Windows)
+dotnet build src/Mesh.App -f net10.0-windows10.0.19041.0 -c Debug
 
----
+# Client (iOS) - compiles; device deploy needs a Mac + provisioning
+dotnet build src/Mesh.App -f net10.0-ios -c Debug
 
-## Is it private?
+# Relay
+dotnet build src/Mesh.Relay -c Release
+```
 
-Yes. Messages are encrypted on your device and only decrypted on the recipient's
-device. The relay that passes them along only sees who is talking to whom, never
-*what* is said. If you want even that to stay with you, you can
-[run your own relay](#run-your-own-relay).
+The Windows build bundles the TotalControl MCP server under `mcp/totalcontrol` (publish it first
+with `_deploy/publish-totalcontrol.ps1`).
 
----
+## Tests
 
-## Frequently asked
-
-**Does it cost anything?**
-Free for personal use. If you use it for business, you need a commercial
-license - open an issue on this repo to arrange one.
-
-**Do I need to set up an AI model?**
-No. There's a free one built in so you can start immediately. You can switch to
-your own model any time in Settings.
-
-**Which platforms?**
-Windows today. Mobile is on the way.
-
-**Where's my data?**
-On your device, in an encrypted local database. Nothing is stored in the cloud in
-readable form.
-
----
-
-## Run your own relay
-
-*(Advanced - most people don't need this.)*
-
-A relay is the small server that routes encrypted messages between people. You
-can run your own so the message metadata stays entirely with you. It lives in its
-own repo: **[MeshRelayAI/Relay](https://github.com/MeshRelayAI/Relay)** - Docker
-setup, ready-to-run binaries, and a full guide.
-
----
+```powershell
+dotnet run --project _smoke -- <relayUrl>        # 13 SignalR e2e checks
+dotnet run --project _hostedtest -- <relayUrl>   # hosted free-model tool call
+```
 
 ## License
 
-Mesh is free for personal use. For commercial or business use, open an issue on
-this repo to arrange a commercial license.
-
-
+Mesh is free for personal and noncommercial use under the PolyForm Noncommercial
+License 1.0.0. See [LICENSE](LICENSE). Commercial use, including any use by or for
+a business, requires a separate commercial license: open an issue to arrange one.

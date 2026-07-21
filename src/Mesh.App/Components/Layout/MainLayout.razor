@@ -1,0 +1,253 @@
+@inherits LayoutComponentBase
+@using Mesh.App.Domain
+@inject AppState State
+@inject MeshClient Mesh
+@inject MsalAuthService Msal
+@inject ModelSetupService Setup
+@inject FoundryLocalService Foundry
+@inject NavigationManager Nav
+@inject IAppControl AppControl
+@inject UpdateService Updater
+@inject ConnectorCatalogService Catalog
+@inject IJSRuntime JS
+@inject IUiModeService UiModeSvc
+@implements IDisposable
+
+@if (onboardingActive || !State.IsOnboarded)
+{
+    <Onboarding @key="State.PairingLinkGeneration" OnDone="CompleteOnboarding" />
+}
+else if (UiModeSvc.EffectiveMode == UiMode.Phone)
+{
+    <MobileShell ModeClass="ui-mode-phone">
+        @Body
+    </MobileShell>
+}
+else
+{
+    <div class="page @ShellClass">
+        <div class="scrim @(navOpen ? "show" : "")" @onclick="() => navOpen = false"></div>
+        <div class="sidebar @(navOpen ? "open" : "")" aria-label="Sidebar">
+            <NavMenu OnNavigate="CloseNav" />
+            <div class="me">
+                <div class="me-name">@DisplayName</div>
+                <div class="me-status @(Mesh.Connected ? "on" : "off")">
+                    <i class="bi @(Mesh.Connected ? "bi-check-circle-fill" : "bi-circle")"></i>
+                    @(Mesh.Connected ? "connected" : "offline")
+                </div>
+            </div>
+        </div>
+        <main role="main">
+            <div class="pane">
+                <div class="mobile-bar">
+                    <button class="hamburger" @onclick="() => navOpen = !navOpen" aria-label="Toggle navigation menu" title="Menu"><i class="bi bi-list"></i></button>
+                    <span class="mobile-title"><img src="logo-mark.png" alt="Mesh" class="mobile-logo" /> Mesh</span>
+                </div>
+                @if (Setup.HasBanner)
+                {
+                    <div class="global-banner @(Setup.Running ? "running" : Setup.Success == true ? "ok" : "err")">
+                        @if (Setup.Running)
+                        {
+                            <span class="spinner"></span>
+                            <span class="gb-text">Model setup: @(Setup.Status ?? "working...")</span>
+                        }
+                        else
+                        {
+                            <i class="bi @(Setup.Success == true ? "bi-check-circle" : "bi-exclamation-triangle")"></i>
+                            <span class="gb-text">@Setup.Status</span>
+                        }
+                        @if (!Setup.Running)
+                        {
+                            <button class="gb-close" @onclick="Setup.Dismiss" title="Dismiss" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+                        }
+                        else
+                        {
+                            <a class="gb-link" href="settings">View</a>
+                        }
+                    </div>
+                }
+                @if (Updater.Available is not null && !Updater.BannerDismissed)
+                {
+                    <div class="global-banner update">
+                        <i class="bi bi-arrow-up-circle-fill"></i>
+                        <span class="gb-text">Mesh @Updater.Available.Version.ToString(3) is available.</span>
+                        <a class="gb-link" href="settings">Update</a>
+                        <button class="gb-close" @onclick="Updater.DismissBanner" title="Dismiss" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                }
+                <div class="content">
+                    @Body
+                </div>
+            </div>
+        </main>
+    </div>
+}
+
+@if (State.IsOnboarded)
+{
+    <ToolApprovalPrompt />
+    @if (!State.Profile.DiscoveryTourCompleted)
+    {
+        <DiscoveryTour />
+    }
+}
+
+@code {
+    bool navOpen;
+    DotNetObjectReference<MainLayout>? fileLinkRef;
+    UiMode _prevEffectiveMode;
+
+    string DisplayName => string.IsNullOrWhiteSpace(State.Profile.DisplayName)
+        ? State.Profile.Handle : State.Profile.DisplayName;
+
+    string ShellClass => "ui-mode-desktop";
+    bool onboardingActive;
+
+    void CloseNav() => navOpen = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        onboardingActive = !State.IsOnboarded;
+        _prevEffectiveMode = UiModeSvc.EffectiveMode;
+        State.Changed += Refresh;
+        Mesh.StateChanged += Refresh;
+        Setup.Changed += Refresh;
+        Updater.Changed += Refresh;
+        UiModeSvc.Changed += OnModeChanged;
+
+        // When a toast is clicked, bring the window up and navigate to the relevant page.
+#if WINDOWS
+        global::Mesh.App.Platforms.Windows.WindowsNotifier.OnActivated = route => InvokeAsync(() =>
+        {
+            AppControl.ShowMainWindow();
+            if (!string.IsNullOrWhiteSpace(route)) Nav.NavigateTo(route);
+        });
+#endif
+
+        // A clicked mesh:// deep link (service or handle) opens the matching conversation.
+        DeepLinkDispatch.SetHandler(uri => InvokeAsync(() => HandleDeepLink(uri)));
+
+        if (State.IsOnboarded)
+        {
+            // In Phone mode the desktop Home ("/") and Messages ("/messages") routes are
+            // replaced by the reworked mobile screens. Redirect on initial load.
+            if (UiModeSvc.EffectiveMode == UiMode.Phone)
+            {
+                var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/');
+                if (path == "") Nav.NavigateTo("/m/me");
+                else if (path == "messages") Nav.NavigateTo("/m/messages");
+            }
+
+            await Msal.InitializeAsync();
+            await Mesh.RegisterAsync();
+            await Mesh.ConnectAsync();
+            // Pull the relay's connector catalog (public OAuth metadata) in the background so the
+            // Knowledge page can offer one-click connectors. Cached for brief offline periods.
+            _ = Task.Run(() => Catalog.RefreshAsync());
+        }
+        // Preload the on-device model catalog once, in the background, so Settings
+        // shows it instantly without reloading (and without resetting the selection).
+        if (State.Profile.Model.Provider == ModelProvider.FoundryLocal)
+            _ = Task.Run(() => Foundry.PreloadModelsAsync());
+
+        // Automatic update checks: one now, then periodically. Surfaces the update banner.
+        Updater.StartAutoChecks();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        fileLinkRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("meshUI.initFileLinks", fileLinkRef);
+    }
+
+    [JSInvokable]
+    public Task OpenLocalFile(string uri) => LocalFileLauncher.OpenAsync(uri);
+
+    private void Refresh()
+    {
+        if (!State.IsOnboarded) onboardingActive = true;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void CompleteOnboarding()
+    {
+        onboardingActive = false;
+        Refresh();
+    }
+
+    // Raised from any thread by UiModeService; marshal to the UI thread.
+    private void OnModeChanged(object? sender, EventArgs e)
+        => _ = InvokeAsync(HandleModeChange);
+
+    private void HandleModeChange()
+    {
+        var newMode = UiModeSvc.EffectiveMode;
+        var prevMode = _prevEffectiveMode;
+        _prevEffectiveMode = newMode;
+
+        // Close the hamburger nav whenever the mode changes.
+        navOpen = false;
+
+        if (State.IsOnboarded)
+        {
+            var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/');
+
+            if (prevMode != UiMode.Phone && newMode == UiMode.Phone)
+            {
+                // Entering Phone: redirect desktop routes to their mobile equivalents.
+                if (path == "") Nav.NavigateTo("/m/me");
+                else if (path == "messages") Nav.NavigateTo("/m/messages");
+            }
+            else if (prevMode == UiMode.Phone && newMode != UiMode.Phone)
+            {
+                // Leaving Phone: redirect mobile routes back to desktop equivalents.
+                if (path == "m/me") Nav.NavigateTo("/");
+                else if (path == "m/messages") Nav.NavigateTo("/messages");
+            }
+        }
+
+        // Bring the window foreground when triggered from a second command-line launch.
+        if (UiModeSvc.Source == UiModeSource.CommandLine)
+            AppControl.ShowMainWindow();
+
+        StateHasChanged();
+    }
+
+    // Routes a mesh:// deep link: ensure the target conversation exists, bring the window forward,
+    // and open it in Messages. Services and handles both land in a Messages thread.
+    private void HandleDeepLink(string uri)
+    {
+        if (DeepLink.TryParsePairing(uri, out var pairing))
+        {
+            State.SetPendingPairingLink(pairing);
+            return;
+        }
+
+        var link = DeepLink.TryParse(uri);
+        string? key = null;
+        if (link.Kind == DeepLink.Kind.Service && !string.IsNullOrEmpty(link.Handle) && !string.IsNullOrEmpty(link.ServiceId))
+            key = State.GetOrCreateServiceConversation(link.Handle!, link.ServiceId!, link.ServiceName).Handle;
+        else if (link.Kind == DeepLink.Kind.User && !string.IsNullOrEmpty(link.Handle))
+            key = State.GetOrCreateConversation(link.Handle!).Handle;
+        if (key is null) return;
+
+        AppControl.ShowMainWindow();
+        State.RequestOpenConversation(key);
+        Nav.NavigateTo(UiModeSvc.EffectiveMode == UiMode.Phone ? "/m/messages" : "/messages");
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= Refresh;
+        Mesh.StateChanged -= Refresh;
+        Setup.Changed -= Refresh;
+        Updater.Changed -= Refresh;
+        UiModeSvc.Changed -= OnModeChanged;
+#if WINDOWS
+        global::Mesh.App.Platforms.Windows.WindowsNotifier.OnActivated = null;
+#endif
+        DeepLinkDispatch.SetHandler(null);
+        fileLinkRef?.Dispose();
+    }
+}

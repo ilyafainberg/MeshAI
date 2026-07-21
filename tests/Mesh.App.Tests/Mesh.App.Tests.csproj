@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mesh.App.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Link only UiModeService.cs so pure parsing/resolution logic is tested directly
+         without a MAUI build dependency. The file compiles cleanly against net10.0 and
+         Microsoft.Extensions.Logging.Abstractions. -->
+    <Compile Include="..\..\src\Mesh.App\Services\UiModeService.cs" Link="UiModeService.cs" />
+    <Compile Include="..\..\src\Mesh.App\Services\CopilotAcpProtocol.cs" Link="CopilotAcpProtocol.cs" />
+    <Compile Include="..\..\src\Mesh.App\Services\MeshDb.cs" Link="MeshDb.cs" />
+    <Compile Include="..\..\src\Mesh.App\Services\ProfileSyncState.cs" Link="ProfileSyncState.cs" />
+    <Compile Include="..\..\src\Mesh.App\Domain\Models.cs" Link="Domain\Models.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.9.2" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.9.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mesh.Shared\Mesh.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
